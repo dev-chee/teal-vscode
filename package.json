@@ -1,0 +1,401 @@
+{
+  "name": "teal-vscode",
+  "displayName": "Teal",
+  "description": "Teal 语言支持：本地语言服务器、运行和源码调试。",
+  "version": "0.1.0",
+  "publisher": "dev-chee",
+  "license": "MIT",
+  "engines": {
+    "vscode": "^1.91.0"
+  },
+  "categories": [
+    "Programming Languages",
+    "Debuggers",
+    "Formatters"
+  ],
+  "keywords": [
+    "teal",
+    "lsp"
+  ],
+  "main": "./dist/extension.js",
+  "extensionKind": [
+    "ui"
+  ],
+  "activationEvents": [
+    "onLanguage:teal",
+    "onDebugResolve:teal",
+    "onDebugInitialConfigurations"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": "limited",
+      "description": "未受信任时仅提供静态语言支持，不启动本地工具链。",
+      "restrictedConfigurations": [
+        "teal.toolchain.path",
+        "teal.run.options",
+        "teal.run.args",
+        "teal.lsp.entryFiles"
+      ]
+    },
+    "virtualWorkspaces": {
+      "supported": false,
+      "description": "Teal 工具链需要本地文件。"
+    }
+  },
+  "contributes": {
+    "languages": [
+      {
+        "id": "teal",
+        "aliases": [
+          "Teal",
+          "teal"
+        ],
+        "extensions": [
+          ".tl"
+        ],
+        "configuration": "./language-configuration.json"
+      }
+    ],
+    "grammars": [
+      {
+        "language": "teal",
+        "scopeName": "source.teal",
+        "path": "./syntaxes/teal.tmLanguage.json"
+      }
+    ],
+    "snippets": [
+      {
+        "language": "teal",
+        "path": "./snippets/teal.json"
+      }
+    ],
+    "configurationDefaults": {
+      "[teal]": {
+        "editor.insertSpaces": true,
+        "editor.tabSize": 4,
+        "editor.semanticHighlighting.enabled": true
+      }
+    },
+    "commands": [
+      {
+        "command": "teal.restartServer",
+        "title": "重启语言服务器",
+        "category": "Teal",
+        "icon": "$(refresh)",
+        "enablement": "isWorkspaceTrusted && teal.supported"
+      },
+      {
+        "command": "teal.showOutput",
+        "title": "显示日志",
+        "category": "Teal",
+        "icon": "$(output)"
+      },
+      {
+        "command": "teal.openSettings",
+        "title": "配置工具链",
+        "category": "Teal",
+        "icon": "$(settings-gear)"
+      },
+      {
+        "command": "teal.runFile",
+        "title": "运行当前文件",
+        "category": "Teal",
+        "icon": "$(play)",
+        "enablement": "isWorkspaceTrusted && teal.supported"
+      },
+      {
+        "command": "teal.debugFile",
+        "title": "调试当前文件",
+        "category": "Teal",
+        "icon": "$(debug-alt)",
+        "enablement": "isWorkspaceTrusted && teal.supported"
+      }
+    ],
+    "menus": {
+      "editor/title": [
+        {
+          "command": "teal.runFile",
+          "when": "resourceLangId == teal && resourceScheme == file && teal.supported",
+          "group": "navigation@20"
+        },
+        {
+          "command": "teal.debugFile",
+          "when": "resourceLangId == teal && resourceScheme == file && teal.supported",
+          "group": "navigation@21"
+        }
+      ]
+    },
+    "configuration": {
+      "title": "Teal",
+      "properties": {
+        "teal.toolchain.path": {
+          "type": "string",
+          "default": "",
+          "scope": "machine-overridable",
+          "description": "包含 teal.exe、teal-lsp.exe、teal-dap.exe 的绝对目录。留空从 PATH 选择同目录工具链；显式目录无效时不回退。"
+        },
+        "teal.lsp.entryFiles": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "description": "根分析文件；相对路径以工作区目录为基准。留空由 fn main() 自动确定。"
+        },
+        "teal.run.options": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "description": "传给 teal 的 CLI 选项，不包含程序文件或分隔符 --。不会自动授予宿主权限。"
+        },
+        "teal.run.args": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          },
+          "default": [],
+          "scope": "resource",
+          "description": "通过 -- 传给 Teal 程序的参数。"
+        },
+        "teal.trace.server": {
+          "type": "string",
+          "enum": [
+            "off",
+            "messages",
+            "verbose"
+          ],
+          "default": "off",
+          "scope": "window",
+          "description": "语言服务器协议日志级别。"
+        }
+      }
+    },
+    "breakpoints": [
+      {
+        "language": "teal"
+      }
+    ],
+    "debuggers": [
+      {
+        "type": "teal",
+        "label": "Teal",
+        "languages": [
+          "teal"
+        ],
+        "configurationAttributes": {
+          "launch": {
+            "required": [
+              "program"
+            ],
+            "properties": {
+              "program": {
+                "type": "string",
+                "description": "Teal source file.",
+                "default": "${file}"
+              },
+              "cwd": {
+                "type": "string",
+                "description": "Working directory.",
+                "default": "${workspaceFolder}"
+              },
+              "args": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": [],
+                "description": "Arguments passed to the program."
+              },
+              "console": {
+                "type": "string",
+                "enum": [
+                  "integratedTerminal",
+                  "externalTerminal"
+                ],
+                "default": "integratedTerminal"
+              },
+              "stopOnEntry": {
+                "type": "boolean",
+                "default": false
+              },
+              "runtimeProfile": {
+                "type": "string",
+                "enum": [
+                  "core",
+                  "native",
+                  "web"
+                ],
+                "default": "native"
+              },
+              "compilerDebug": {
+                "type": "boolean",
+                "default": false
+              },
+              "allowCapabilities": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "allowReadFiles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "allowReadDirectories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "allowWriteFiles": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "allowWriteDirectories": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "allowExecutables": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "allowEnvironment": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "allow": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "warn": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "deny": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              },
+              "forbid": {
+                "type": "array",
+                "items": {
+                  "type": "string"
+                },
+                "default": []
+              }
+            }
+          },
+          "attach": {
+            "required": [
+              "port",
+              "token"
+            ],
+            "properties": {
+              "host": {
+                "type": "string",
+                "default": "127.0.0.1",
+                "description": "IP address of the debuggee."
+              },
+              "port": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 65535,
+                "default": 4711
+              },
+              "token": {
+                "type": "string",
+                "description": "Authentication token of the debuggee."
+              }
+            }
+          }
+        },
+        "initialConfigurations": [
+          {
+            "type": "teal",
+            "request": "launch",
+            "name": "Teal: Current File",
+            "program": "${file}",
+            "console": "integratedTerminal"
+          }
+        ],
+        "configurationSnippets": [
+          {
+            "label": "Teal: Launch",
+            "body": {
+              "type": "teal",
+              "request": "launch",
+              "name": "Teal: Launch",
+              "program": "^\"\\${file}\"",
+              "console": "integratedTerminal"
+            }
+          },
+          {
+            "label": "Teal: Attach",
+            "body": {
+              "type": "teal",
+              "request": "attach",
+              "name": "Teal: Attach",
+              "host": "127.0.0.1",
+              "port": 4711,
+              "token": "^\"\\${input:tealDebugToken}\""
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "scripts": {
+    "compile": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "lint": "eslint src",
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "test": "node scripts/test-electron.mjs",
+    "package": "node scripts/package.mjs"
+  },
+  "dependencies": {
+    "vscode-languageclient": "9.0.1"
+  },
+  "devDependencies": {
+    "mocha": "^11.0.0",
+    "@types/mocha": "^10.0.0",
+    "@eslint/js": "^10.0.0",
+    "eslint": "^10.0.0",
+    "typescript-eslint": "^8.0.0",
+    "typescript": "~5.9.3",
+    "@types/node": "^20.0.0",
+    "@types/vscode": "1.91.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.6.0",
+    "esbuild": "^0.25.0"
+  }
+}

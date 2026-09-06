@@ -1,0 +1,9 @@
+node_modules/
+dist/
+out/
+out-test/
+.vscode-test/
+target/
+.teal/
+*.vsix
+*.log

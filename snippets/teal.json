@@ -1,0 +1,8 @@
+{
+  "Main function": { "prefix": "main", "body": ["fn main() {", "    $0", "}"], "description": "File entry point" },
+  "Function": { "prefix": "fn", "body": ["fn ${1:name}(${2:argument}: ${3:int}) -> ${4:int} {", "    $0", "}"], "description": "Module function" },
+  "Anonymous function": { "prefix": "closure", "body": ["fn(${1:argument}: ${2:int}) -> ${3:int} {", "    $0", "}"], "description": "Anonymous function" },
+  "Conditional": { "prefix": "if", "body": ["if ${1:condition} {", "    $0", "}"], "description": "Conditional block" },
+  "Loop": { "prefix": "loop", "body": ["loop {", "    $0", "}"], "description": "Loop block" },
+  "Iteration": { "prefix": "for", "body": ["for ${1:item} in ${2:items} {", "    $0", "}"], "description": "Collection iteration" }
+}
