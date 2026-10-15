@@ -10,6 +10,7 @@ import { DebugConfigurations } from '../src/execution';
 
 export function run(): Promise<void> {
     const mocha = new Mocha({ ui: 'tdd', color: true });
+    if (process.env.TEAL_TEST_GREP) mocha.grep(process.env.TEAL_TEST_GREP);
     mocha.suite.emit('pre-require', globalThis, __filename, mocha);
     mocha.suite.timeout(60_000);
 
@@ -54,6 +55,19 @@ export function run(): Promise<void> {
             } finally {
                 await closeAndRemove(root);
             }
+        });
+
+        test('recognizes generated builtin interface files without treating them as executable source', async () => {
+            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-interface-'));
+            try {
+                const source = path.join(root, 'builtin.tli');
+                await writeFile(source, 'builtin global {\n    fn print(values: printable...);\n}\n');
+                const document = await vscode.workspace.openTextDocument(vscode.Uri.file(source));
+                assert.equal(document.languageId, 'teal-interface');
+                const extension = vscode.extensions.getExtension('dev-chee.teal-vscode')!;
+                assert.ok(extension.packageJSON.contributes.grammars.some((grammar: { language: string }) => grammar.language === document.languageId));
+                assert.deepEqual(vscode.languages.getDiagnostics(document.uri), []);
+            } finally { await closeAndRemove(root); }
         });
 
         test('debug configurations default to integrated terminal and reject invalid attach input', async () => {

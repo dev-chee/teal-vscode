@@ -1,0 +1,18 @@
+{
+  "name": "Teal Interface",
+  "scopeName": "source.teal.interface",
+  "patterns": [
+    {
+      "match": "\\b(fn|task)\\s+([A-Za-z_][A-Za-z_0-9]*)",
+      "captures": {
+        "1": { "name": "storage.type.teal" },
+        "2": { "name": "entity.name.function.teal" }
+      }
+    },
+    { "name": "storage.modifier.teal", "match": "\\bbuiltin\\b" },
+    { "name": "entity.name.namespace.teal", "match": "\\bglobal\\b" },
+    { "name": "support.type.teal", "match": "\\b(?:any|number|printable|[A-Z][A-Za-z_0-9]*)\\b" },
+    { "name": "entity.other.attribute-name.teal", "match": "@[A-Za-z_][A-Za-z_0-9]*" },
+    { "include": "source.teal" }
+  ]
+}

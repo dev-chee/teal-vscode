@@ -4,9 +4,9 @@
 
 ## 安装与工具链
 
-通过 VS Code 的“扩展：从 VSIX 安装”选择构建生成的 `target/teal-vscode-0.1.0.vsix`，然后打开 `.tl` 文件。
+通过 VS Code 的“扩展：从 VSIX 安装”选择构建生成的 `target/teal-vscode-0.1.1.vsix`，然后打开 `.tl` 文件。
 
-`pnpm run package:windows` 生成 Windows x64 专用包 `target/teal-vscode-0.1.0-win32-x64.vsix`，用于 Windows 本地 VS Code。WSL 请使用 `pnpm run package` 生成的通用包。两种包均不包含 Teal 工具链。
+`pnpm run package:windows` 生成 Windows x64 专用包 `target/teal-vscode-0.1.1-win32-x64.vsix`，用于 Windows 本地 VS Code。WSL 请使用 `pnpm run package` 生成的通用包。两种包均不包含 Teal 工具链。
 
 插件不包含或下载工具链。先在 Teal 源码仓库构建：
 
@@ -48,6 +48,8 @@ cargo build --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-da
 该目录必须包含具有执行权限的 Linux `teal`、`teal-lsp`、`teal-dap`。WSL 配置使用 Linux 路径，不能填写 `D:\teal-lang` 或使用 Windows `.exe` 工具链。运行和集成终端调试均在 WSL 内执行。
 
 ## 编辑
+
+`.tl` 使用 Teal 语言服务；`.tli`（包括 `builtin.tli`、`builtins.tli`）使用独立的 Teal Interface 声明高亮，支持 `builtin`、泛型、函数和 task 签名。接口文件不作为可执行源码提交给 LSP，也不显示运行/调试按钮。
 
 提供补全、诊断、悬停、签名帮助、定义、引用、重命名、文档及工作区符号、格式化和语义高亮。语言行为完全由本地 `teal-lsp` 决定；格式化固定使用四空格和 LF，语法不完整时可能返回空编辑。
 

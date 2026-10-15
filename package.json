@@ -2,7 +2,7 @@
   "name": "teal-vscode",
   "displayName": "Teal",
   "description": "Teal 语言支持：本地语言服务器、运行和源码调试。",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "publisher": "dev-chee",
   "license": "MIT",
   "engines": {
@@ -54,6 +54,17 @@
           ".tl"
         ],
         "configuration": "./language-configuration.json"
+      },
+      {
+        "id": "teal-interface",
+        "aliases": [
+          "Teal Interface",
+          "tli"
+        ],
+        "extensions": [
+          ".tli"
+        ],
+        "configuration": "./language-configuration.json"
       }
     ],
     "grammars": [
@@ -61,6 +72,11 @@
         "language": "teal",
         "scopeName": "source.teal",
         "path": "./syntaxes/teal.tmLanguage.json"
+      },
+      {
+        "language": "teal-interface",
+        "scopeName": "source.teal.interface",
+        "path": "./syntaxes/teal-interface.tmLanguage.json"
       }
     ],
     "snippets": [
@@ -74,6 +90,10 @@
         "editor.insertSpaces": true,
         "editor.tabSize": 4,
         "editor.semanticHighlighting.enabled": true
+      },
+      "[teal-interface]": {
+        "editor.insertSpaces": true,
+        "editor.tabSize": 4
       }
     },
     "commands": [
@@ -349,16 +369,18 @@
     "vscode-languageclient": "9.0.1"
   },
   "devDependencies": {
-    "mocha": "^11.0.0",
-    "@types/mocha": "^10.0.0",
     "@eslint/js": "^10.0.0",
-    "eslint": "^10.0.0",
-    "typescript-eslint": "^8.0.0",
-    "typescript": "~5.9.3",
+    "@types/mocha": "^10.0.0",
     "@types/node": "^20.0.0",
     "@types/vscode": "1.91.0",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.6.0",
-    "esbuild": "^0.25.0"
+    "esbuild": "^0.25.0",
+    "eslint": "^10.0.0",
+    "mocha": "^11.0.0",
+    "typescript": "~5.9.3",
+    "typescript-eslint": "^8.0.0",
+    "vscode-oniguruma": "^2.0.1",
+    "vscode-textmate": "^9.3.2"
   }
 }

@@ -26,10 +26,10 @@ importers:
         version: 1.91.0
       '@vscode/test-electron':
         specifier: ^2.5.2
-        version: 2.5.2(supports-color@7.2.0)
+        version: 2.5.2(supports-color@8.1.1)
       '@vscode/vsce':
         specifier: ^3.6.0
-        version: 3.9.2(supports-color@8.1.1)
+        version: 3.9.2(supports-color@7.2.0)
       esbuild:
         specifier: ^0.25.0
         version: 0.25.12
@@ -45,6 +45,12 @@ importers:
       typescript-eslint:
         specifier: ^8.0.0
         version: 8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3)
+      vscode-oniguruma:
+        specifier: ^2.0.1
+        version: 2.0.1
+      vscode-textmate:
+        specifier: ^9.3.2
+        version: 9.3.2
 
 packages:
 
@@ -1861,6 +1867,12 @@ packages:
   vscode-languageserver-types@3.17.5:
     resolution: {integrity: sha512-Ld1VelNuX9pdF39h2Hgaeb5hEZM2Z3jUrrMgWQAu82jMtZp7p3vJT3BzToKtZI7NgQssZje5o0zryOrhQvzQAg==}
 
+  vscode-oniguruma@2.0.1:
+    resolution: {integrity: sha512-poJU8iHIWnC3vgphJnrLZyI3YdqRlR27xzqDmpPXYzA93R4Gk8z7T6oqDzDoHjoikA2aS82crdXFkjELCdJsjQ==}
+
+  vscode-textmate@9.3.2:
+    resolution: {integrity: sha512-n2uGbUcrjhUEBH16uGA0TvUfhWwliFZ1e3+pTjrkim1Mt7ydB41lV08aUvsi70OlzDWp6X7Bx3w/x3fAXIsN0Q==}
+
   whatwg-encoding@3.1.1:
     resolution: {integrity: sha512-6qN4hJdMwfYBtE3YBTTHhoeuUrDBPZmbQaxWAqSALV/MeEnR5z1xd8UKud2RAkFoPkmB+hli1TZSnyi84xz1vQ==}
     engines: {node: '>=18'}
@@ -2332,12 +2344,12 @@ snapshots:
 
   '@types/vscode@1.91.0': {}
 
-  '@typescript-eslint/eslint-plugin@8.69.0(@typescript-eslint/parser@8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3))(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3)':
+  '@typescript-eslint/eslint-plugin@8.69.0(@typescript-eslint/parser@8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3))(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3)':
     dependencies:
       '@eslint-community/regexpp': 4.12.2
-      '@typescript-eslint/parser': 8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3)
+      '@typescript-eslint/parser': 8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3)
       '@typescript-eslint/scope-manager': 8.69.0
-      '@typescript-eslint/type-utils': 8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3)
+      '@typescript-eslint/type-utils': 8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3)
       '@typescript-eslint/utils': 8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3)
       '@typescript-eslint/visitor-keys': 8.69.0
       eslint: 10.10.0(supports-color@7.2.0)
@@ -2348,7 +2360,7 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@typescript-eslint/parser@8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3)':
+  '@typescript-eslint/parser@8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3)':
     dependencies:
       '@typescript-eslint/scope-manager': 8.69.0
       '@typescript-eslint/types': 8.69.0
@@ -2378,7 +2390,7 @@ snapshots:
     dependencies:
       typescript: 5.9.3
 
-  '@typescript-eslint/type-utils@8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3)':
+  '@typescript-eslint/type-utils@8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3)':
     dependencies:
       '@typescript-eslint/types': 8.69.0
       '@typescript-eslint/typescript-estree': 8.69.0(supports-color@8.1.1)(typescript@5.9.3)
@@ -2431,10 +2443,10 @@ snapshots:
     transitivePeerDependencies:
       - supports-color
 
-  '@vscode/test-electron@2.5.2(supports-color@7.2.0)':
+  '@vscode/test-electron@2.5.2(supports-color@8.1.1)':
     dependencies:
-      http-proxy-agent: 7.0.2(supports-color@7.2.0)
-      https-proxy-agent: 7.0.6(supports-color@7.2.0)
+      http-proxy-agent: 7.0.2(supports-color@8.1.1)
+      https-proxy-agent: 7.0.6(supports-color@8.1.1)
       jszip: 3.10.1
       ora: 8.2.0
       semver: 7.8.5
@@ -2480,7 +2492,7 @@ snapshots:
       '@vscode/vsce-sign-win32-arm64': 2.0.6
       '@vscode/vsce-sign-win32-x64': 2.0.6
 
-  '@vscode/vsce@3.9.2(supports-color@8.1.1)':
+  '@vscode/vsce@3.9.2(supports-color@7.2.0)':
     dependencies:
       '@azure/identity': 4.13.2(supports-color@8.1.1)
       '@secretlint/node': 10.2.2(supports-color@8.1.1)
@@ -2503,7 +2515,7 @@ snapshots:
       minimatch: 10.2.6
       parse-semver: 1.1.1
       read: 1.0.7
-      secretlint: 10.2.2(supports-color@8.1.1)
+      secretlint: 10.2.2(supports-color@7.2.0)
       semver: 7.8.5
       tmp: 0.2.7
       typed-rest-client: 1.8.11
@@ -3096,24 +3108,10 @@ snapshots:
       domutils: 3.2.2
       entities: 7.0.1
 
-  http-proxy-agent@7.0.2(supports-color@7.2.0):
-    dependencies:
-      agent-base: 7.1.4
-      debug: 4.4.3(supports-color@7.2.0)
-    transitivePeerDependencies:
-      - supports-color
-
   http-proxy-agent@7.0.2(supports-color@8.1.1):
     dependencies:
       agent-base: 7.1.4
       debug: 4.4.3(supports-color@8.1.1)
-    transitivePeerDependencies:
-      - supports-color
-
-  https-proxy-agent@7.0.6(supports-color@7.2.0):
-    dependencies:
-      agent-base: 7.1.4
-      debug: 4.4.3(supports-color@7.2.0)
     transitivePeerDependencies:
       - supports-color
 
@@ -3643,7 +3641,7 @@ snapshots:
 
   sax@1.6.1: {}
 
-  secretlint@10.2.2(supports-color@8.1.1):
+  secretlint@10.2.2(supports-color@7.2.0):
     dependencies:
       '@secretlint/config-creator': 10.2.2
       '@secretlint/formatter': 10.2.2(supports-color@8.1.1)
@@ -3866,8 +3864,8 @@ snapshots:
 
   typescript-eslint@8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3):
     dependencies:
-      '@typescript-eslint/eslint-plugin': 8.69.0(@typescript-eslint/parser@8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3))(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3)
-      '@typescript-eslint/parser': 8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3)
+      '@typescript-eslint/eslint-plugin': 8.69.0(@typescript-eslint/parser@8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3))(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3)
+      '@typescript-eslint/parser': 8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@7.2.0)(typescript@5.9.3)
       '@typescript-eslint/typescript-estree': 8.69.0(supports-color@8.1.1)(typescript@5.9.3)
       '@typescript-eslint/utils': 8.69.0(eslint@10.10.0(supports-color@7.2.0))(supports-color@8.1.1)(typescript@5.9.3)
       eslint: 10.10.0(supports-color@7.2.0)
@@ -3920,6 +3918,10 @@ snapshots:
       vscode-languageserver-types: 3.17.5
 
   vscode-languageserver-types@3.17.5: {}
+
+  vscode-oniguruma@2.0.1: {}
+
+  vscode-textmate@9.3.2: {}
 
   whatwg-encoding@3.1.1:
     dependencies:
