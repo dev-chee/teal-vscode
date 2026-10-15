@@ -6,6 +6,8 @@
 
 通过 VS Code 的“扩展：从 VSIX 安装”选择构建生成的 `target/teal-vscode-0.1.0.vsix`，然后打开 `.tl` 文件。
 
+`pnpm run package:windows` 生成 Windows x64 专用包 `target/teal-vscode-0.1.0-win32-x64.vsix`，用于 Windows 本地 VS Code。WSL 请使用 `pnpm run package` 生成的通用包。两种包均不包含 Teal 工具链。
+
 插件不包含或下载工具链。先在 Teal 源码仓库构建：
 
 ```powershell

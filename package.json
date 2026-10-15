@@ -342,7 +342,8 @@
     "test": "node scripts/test-electron.mjs",
     "package": "node scripts/package.mjs",
     "test:unit": "node scripts/test.mjs",
-    "test:toolchain": "node scripts/test.mjs --toolchain"
+    "test:toolchain": "node scripts/test.mjs --toolchain",
+    "package:windows": "node scripts/package.mjs --target win32-x64"
   },
   "dependencies": {
     "vscode-languageclient": "9.0.1"
