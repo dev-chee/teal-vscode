@@ -1,19 +1,15 @@
-import { spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { runTests } from '@vscode/test-electron';
+import { projectRoot, runNode } from './test-support.mjs';
 
-const tsc = path.join(process.cwd(), 'node_modules', 'typescript', 'bin', 'tsc');
-const build = spawnSync(process.execPath, [path.join(process.cwd(), 'scripts', 'build.mjs')], { stdio: 'inherit' });
-if (build.status !== 0) process.exit(build.status ?? 1);
-const compile = spawnSync(process.execPath, [tsc, '-p', 'tsconfig.test.json'], { stdio: 'inherit' });
-if (compile.status !== 0) process.exit(compile.status ?? 1);
-
-const unit = 'out-test/tests/toolchain.test.js';
-if (!existsSync(unit)) throw new Error(`missing compiled unit test ${unit}`);
-const result = spawnSync(process.execPath, ['--test', unit], { stdio: 'inherit' });
-if (result.status !== 0) process.exit(result.status ?? 1);
+runNode('scripts/test.mjs');
+if (process.platform !== 'win32' || process.arch !== 'x64') {
+  throw new Error('Extension host tests require Windows x64; use test:unit or test:toolchain on WSL.');
+}
+if (!process.env.TEAL_TOOLCHAIN_PATH) throw new Error('TEAL_TOOLCHAIN_PATH must point at rebuilt Teal executables.');
+runNode('scripts/build.mjs');
 
 const profile = path.join(os.tmpdir(), `teal-vscode-user-${process.pid}`);
 const workspace = path.join(profile, 'anchor.code-workspace');
@@ -22,8 +18,8 @@ writeFileSync(workspace, JSON.stringify({ folders: [{ path: '.' }] }));
 
 await runTests({
   vscodeExecutablePath: process.env.VSCODE_EXECUTABLE_PATH,
-  extensionDevelopmentPath: process.env.TEAL_TEST_EXTENSION_PATH ?? process.cwd(),
-  extensionTestsPath: path.join(process.cwd(), 'out-test', 'tests', 'extensionHost.test.js'),
+  extensionDevelopmentPath: process.env.TEAL_TEST_EXTENSION_PATH ?? projectRoot,
+  extensionTestsPath: path.join(projectRoot, 'out-test', 'tests', 'extensionHost.test.js'),
   launchArgs: [
     '--disable-extensions',
     workspace,

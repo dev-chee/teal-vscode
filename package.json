@@ -19,7 +19,7 @@
   ],
   "main": "./dist/extension.js",
   "extensionKind": [
-    "ui"
+    "workspace"
   ],
   "activationEvents": [
     "onLanguage:teal",
@@ -115,12 +115,12 @@
       "editor/title": [
         {
           "command": "teal.runFile",
-          "when": "resourceLangId == teal && resourceScheme == file && teal.supported",
+          "when": "resourceLangId == teal && (resourceScheme == file || resourceScheme == vscode-remote) && teal.supported",
           "group": "navigation@20"
         },
         {
           "command": "teal.debugFile",
-          "when": "resourceLangId == teal && resourceScheme == file && teal.supported",
+          "when": "resourceLangId == teal && (resourceScheme == file || resourceScheme == vscode-remote) && teal.supported",
           "group": "navigation@21"
         }
       ]
@@ -132,7 +132,7 @@
           "type": "string",
           "default": "",
           "scope": "machine-overridable",
-          "description": "包含 teal.exe、teal-lsp.exe、teal-dap.exe 的绝对目录。留空从 PATH 选择同目录工具链；显式目录无效时不回退。"
+          "description": "工具链绝对目录：Windows 包含 teal.exe、teal-lsp.exe、teal-dap.exe；WSL 包含可执行的 teal、teal-lsp、teal-dap，路径使用 /mnt/d/...。留空从 PATH 选择同目录工具链；显式目录无效时不回退。"
         },
         "teal.lsp.entryFiles": {
           "type": "array",
@@ -141,7 +141,7 @@
           },
           "default": [],
           "scope": "resource",
-          "description": "根分析文件；相对路径以工作区目录为基准。留空由 fn main() 自动确定。"
+          "description": "根分析文件；相对路径以工作区目录为基准。留空由 fn main() 或 task main() 自动确定。"
         },
         "teal.run.options": {
           "type": "array",
@@ -150,7 +150,7 @@
           },
           "default": [],
           "scope": "resource",
-          "description": "传给 teal 的 CLI 选项，不包含程序文件或分隔符 --。不会自动授予宿主权限。"
+          "description": "传给 teal run 的 CLI 选项，例如 --tier hosted、--permission-file permissions.toml；不包含程序文件或分隔符 --。不会自动授予宿主权限。"
         },
         "teal.run.args": {
           "type": "array",
@@ -222,95 +222,55 @@
                 "type": "boolean",
                 "default": false
               },
-              "runtimeProfile": {
-                "type": "string",
-                "enum": [
-                  "core",
-                  "native",
-                  "web"
-                ],
-                "default": "native"
-              },
               "compilerDebug": {
                 "type": "boolean",
                 "default": false
-              },
-              "allowCapabilities": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "default": []
-              },
-              "allowReadFiles": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "default": []
-              },
-              "allowReadDirectories": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "default": []
-              },
-              "allowWriteFiles": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "default": []
-              },
-              "allowWriteDirectories": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "default": []
-              },
-              "allowExecutables": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "default": []
-              },
-              "allowEnvironment": {
-                "type": "array",
-                "items": {
-                  "type": "string"
-                },
-                "default": []
               },
               "allow": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 },
-                "default": []
+                "default": [],
+                "description": "编译器 lint 名称，不是宿主权限。"
               },
               "warn": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 },
-                "default": []
+                "default": [],
+                "description": "编译器 lint 名称，不是宿主权限。"
               },
               "deny": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 },
-                "default": []
+                "default": [],
+                "description": "编译器 lint 名称，不是宿主权限。"
               },
               "forbid": {
                 "type": "array",
                 "items": {
                   "type": "string"
                 },
-                "default": []
+                "default": [],
+                "description": "编译器 lint 名称，不是宿主权限。"
+              },
+              "tier": {
+                "type": "string",
+                "enum": [
+                  "embedded",
+                  "hosted",
+                  "agentic"
+                ],
+                "default": "agentic",
+                "description": "运行层级，仅控制可用功能，不授予权限。省略时由 DAP 使用 agentic。"
+              },
+              "permissionFile": {
+                "type": "string",
+                "description": "权限规则 TOML 文件；相对路径以 cwd 为基准。未指定时使用工具链的工作区权限配置。"
               }
             }
           },
@@ -376,11 +336,13 @@
   "scripts": {
     "compile": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
-    "lint": "eslint src",
+    "lint": "eslint src tests",
     "build": "node scripts/build.mjs",
     "watch": "node scripts/build.mjs --watch",
     "test": "node scripts/test-electron.mjs",
-    "package": "node scripts/package.mjs"
+    "package": "node scripts/package.mjs",
+    "test:unit": "node scripts/test.mjs",
+    "test:toolchain": "node scripts/test.mjs --toolchain"
   },
   "dependencies": {
     "vscode-languageclient": "9.0.1"

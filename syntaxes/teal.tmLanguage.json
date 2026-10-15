@@ -9,12 +9,12 @@
     ] },
     { "name": "entity.name.label.teal", "match": "'[A-Za-z_][A-Za-z0-9_]*" },
     { "name": "keyword.control.teal", "match": "\\b(?:if|else|match|for|in|try|catch|return|break|continue|loop|await)\\b" },
-    { "name": "storage.type.teal", "match": "\\b(?:dylib|host|import|pub|impl|trait|as|fn|class|enum|let|static|struct|type|agent|task)\\b" },
-    { "name": "support.type.teal", "match": "\\b(?:int|float|bool|string|Task)\\b" },
+    { "name": "storage.type.teal", "match": "\\b(?:dylib|host|import|pub|impl|trait|as|fn|class|enum|let|static|const|reflect|struct|type|agent|task)\\b" },
+    { "name": "support.type.teal", "match": "\\b(?:int|float|bool|string|Task|Error)\\b" },
     { "name": "constant.language.teal", "match": "\\b(?:none|true|false)\\b" },
     { "name": "constant.numeric.teal", "match": "(?<![A-Za-z_0-9])(?:[0-9]*\\.[0-9]+|[0-9]+)" },
     { "name": "entity.name.function.teal", "match": "\\b[A-Za-z_][A-Za-z0-9_]*(?=\\s*\\()" },
-    { "name": "keyword.operator.teal", "match": "[-+*/%^!=<>|&:@]+|\\.\\." },
+    { "name": "keyword.operator.teal", "match": "[-+*/%^!=<>|&:@?]+|\\.\\." },
     { "name": "punctuation.section.teal", "match": "[{}()\\[\\],;.]" }
   ]
 }

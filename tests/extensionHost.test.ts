@@ -68,6 +68,35 @@ export function run(): Promise<void> {
             );
         });
 
+        test('resolves tier and permissionFile using debug cwd and rejects legacy launch options', async () => {
+            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-launch-'));
+            try {
+                const source = path.join(root, 'main.tl');
+                const permissionFile = path.join(root, '权限 with spaces.toml');
+                await writeFile(source, 'task main() {}\n');
+                await writeFile(permissionFile, '[permissions]\nrules = []\n');
+                const configurations = new DebugConfigurations();
+                for (const tier of ['embedded', 'hosted', 'agentic']) {
+                    const config = await configurations.resolveDebugConfigurationWithSubstitutedVariables(undefined, {
+                        type: 'teal', request: 'launch', name: 'current', program: source,
+                        cwd: root, console: 'integratedTerminal', tier, permissionFile: path.basename(permissionFile),
+                        allow: ['unused_variable'], args: ['中文 argument'],
+                    });
+                    assert.equal(config.tier, tier);
+                    assert.equal(config.permissionFile, permissionFile);
+                    assert.deepEqual(config.allow, ['unused_variable']);
+                    assert.deepEqual(config.args, ['中文 argument']);
+                }
+                for (const removed of [{ runtimeProfile: 'native' }, { allowCapabilities: [] }, { allowReadFiles: [] }]) {
+                    await assert.rejects(configurations.resolveDebugConfigurationWithSubstitutedVariables(undefined, {
+                        type: 'teal', request: 'launch', name: 'legacy', ...removed,
+                    }), /was removed/);
+                }
+            } finally {
+                await closeAndRemove(root);
+            }
+        });
+
         test('serves concrete LSP results for UTF-16 paths, unsaved changes, rename, diagnostics, formatting, and semantic tokens', async () => {
             const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-lsp-'));
             try {
@@ -233,10 +262,12 @@ export function run(): Promise<void> {
             });
             try {
                 await writeFile(source, 'fn main() {\n    let value = 1;\n    let next_value = value + 1;\n    print(next_value);\n}\n');
+                await writeFile(path.join(root, 'permissions.toml'), '[permissions]\nrules = []\n');
                 vscode.debug.addBreakpoints([new vscode.SourceBreakpoint(new vscode.Location(vscode.Uri.file(source), new vscode.Position(1, 4)))]);
                 assert.equal(await vscode.debug.startDebugging(undefined, {
                     type: 'teal', request: 'launch', name: 'DAP integration', program: source,
                     cwd: root, console: 'integratedTerminal', stopOnEntry: true,
+                    tier: 'hosted', permissionFile: 'permissions.toml',
                 }), true, 'VS Code must accept the Teal launch configuration');
                 const deadline = Date.now() + 35_000;
                 while (!stopped[0] && Date.now() < deadline) await new Promise((resolve) => setTimeout(resolve, 200));
@@ -260,7 +291,7 @@ export function run(): Promise<void> {
                 stage = 'continue';
                 await second.customRequest('continue', { threadId: 1 });
             } catch (error) {
-                throw new Error(`DAP failed during ${stage}; ${error instanceof Error ? error.message : String(error)}`);
+                throw new Error(`DAP failed during ${stage}; ${error instanceof Error ? error.message : String(error)}`, { cause: error });
             } finally {
                 try { if (session?.id && vscode.debug.activeDebugSession?.id === session.id) await vscode.debug.stopDebugging(session); }
                 catch (error) { trace.push(`cleanup:${String(error)}`); }
@@ -327,7 +358,7 @@ export function run(): Promise<void> {
                 });
             });
             try {
-                await writeFile(source, 'fn main() { entry_task(); }\ntask entry_task() {\n    let args = argv();\n    if args[0] != "argument with spaces" { exit(17); }\n    if args[1] != "中文 argument" { exit(19); }\n    if input().await != "stdin value" { exit(18); }\n}\n');
+                await writeFile(source, 'task main() {\n    let args = argv();\n    if args[0] != "argument with spaces" { exit(17); }\n    if args[1] != "中文 argument" { exit(19); }\n    if input() != "stdin value" { exit(18); }\n}\n');
                 await vscode.workspace.getConfiguration('teal', vscode.Uri.file(source)).update('run.args', ['argument with spaces', '中文 argument'], vscode.ConfigurationTarget.Global);
                 taskExecution = await vscode.commands.executeCommand<vscode.TaskExecution>('teal.runFile', vscode.Uri.file(source));
                 assert.ok(taskExecution, 'teal.runFile must return the started ProcessExecution task');
