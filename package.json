@@ -1,6 +1,6 @@
 {
   "name": "teal-vscode",
-  "displayName": "Teal",
+  "displayName": "Teal Language Tools",
   "description": "Teal 语言支持：本地语言服务器、运行和源码调试。",
   "version": "0.1.1",
   "publisher": "dev-chee",
