@@ -1,8 +1,8 @@
 # Change Log
 
-## [Unreleased]
+## [0.1.3] - 2026-10-17
 
-- 增加 Teal: 安装 Teal 工具链，支持 Windows x64 和 WSL Linux x64 的托管发行版下载与 SHA-256 校验。
+- 发布托管工具链安装功能，并支持 Windows x64 与 WSL Linux x64。
 
 ## [0.1.2] - 2026-10-17
 
