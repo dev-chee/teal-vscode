@@ -1,9 +1,15 @@
 import * as vscode from 'vscode';
-import { resolveToolchain, type ToolName } from './toolchain';
+import { resolveToolchainWithManaged, type ToolName } from './toolchain';
 import { executableName, supportsExecution } from './platform';
 
 export function isSupported(): boolean {
     return supportsExecution(process.platform, process.arch, vscode.env.remoteName, vscode.env.uiKind === vscode.UIKind.Desktop);
+}
+
+let managedToolchainDirectory: string | undefined;
+
+export function setManagedToolchainDirectory(directory: string | undefined): void {
+    managedToolchainDirectory = directory;
 }
 
 export function requireExecution(): void {
@@ -14,7 +20,7 @@ export function requireExecution(): void {
 export async function executable(name: ToolName, resource?: vscode.Uri): Promise<string> {
     requireExecution();
     const configured = vscode.workspace.getConfiguration('teal', resource).get<string>('toolchain.path', '');
-    const toolchain = await resolveToolchain(configured);
+    const toolchain = await resolveToolchainWithManaged(configured, managedToolchainDirectory);
     const result = toolchain.tools[name];
     if (!result) throw new Error(`${executableName(name)} is missing from ${toolchain.directory}. Configure a toolchain containing this tool.`);
     return result;

@@ -1,12 +1,14 @@
 import * as vscode from 'vscode';
-import { isSupported, requireExecution } from './environment';
+import { isSupported, requireExecution, setManagedToolchainDirectory } from './environment';
 import { DebugAdapter, DebugConfigurations, debugFile, runFile } from './execution';
 import { LanguageClients } from './languageClient';
+import { currentManagedToolchainTarget, installManagedToolchain, loadManagedToolchain } from './managedToolchain';
 import { Reporter } from './reporting';
 
 let clients: LanguageClients | undefined;
 
 export async function activate(context: vscode.ExtensionContext): Promise<void> {
+    setManagedToolchainDirectory(await loadManagedToolchain(context));
     const output = vscode.window.createOutputChannel('Teal');
     const reporter = new Reporter(output);
     clients = new LanguageClients(reporter);
@@ -15,6 +17,22 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     context.subscriptions.push(
         output,
         vscode.commands.registerCommand('teal.openSettings', () => vscode.commands.executeCommand('workbench.action.openSettings', '@ext:dev-chee.teal-vscode')),
+        vscode.commands.registerCommand('teal.installToolchain', () => reporter.guard(async () => {
+            requireExecution();
+            const target = currentManagedToolchainTarget();
+            if (!target) throw new Error('Managed Teal toolchain installation is only available in supported desktop Windows or WSL Linux hosts.');
+            const configured = vscode.workspace.getConfiguration('teal').get<string>('toolchain.path', '').trim();
+            if (configured) {
+                const choice = await vscode.window.showWarningMessage('teal.toolchain.path is configured and takes priority. Install a managed toolchain anyway?', 'Install anyway');
+                if (choice !== 'Install anyway') return;
+            }
+            const release = vscode.workspace.getConfiguration('teal').get<string>('toolchain.release', 'latest');
+            const installed = await vscode.window.withProgress({ location: vscode.ProgressLocation.Notification, title: 'Installing Teal toolchain' }, async (progress) =>
+                installManagedToolchain(context, release, target, (message) => progress.report({ message })));
+            setManagedToolchainDirectory(installed.directory);
+            await managed.refresh(true);
+            void vscode.window.showInformationMessage(`Teal toolchain ${installed.release} installed for ${installed.target}.`);
+        })),
         vscode.commands.registerCommand('teal.showOutput', () => output.show(true)),
         vscode.commands.registerCommand('teal.restartServer', () => reporter.guard(async () => {
             requireExecution();

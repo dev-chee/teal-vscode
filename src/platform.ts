@@ -8,6 +8,14 @@ export function supportsExecution(platform: NodeJS.Platform, arch: string, remot
     );
 }
 
+export type ManagedToolchainTarget = 'win32-x64' | 'linux-x64';
+
+/** The currently supported managed toolchain targets. WSL uses the Linux target. */
+export function managedToolchainTarget(platform: NodeJS.Platform, arch: string, remoteName: string | undefined, desktop: boolean): ManagedToolchainTarget | undefined {
+    if (!supportsExecution(platform, arch, remoteName, desktop)) return undefined;
+    return platform === 'win32' ? 'win32-x64' : 'linux-x64';
+}
+
 export function executableName(name: string, platform: NodeJS.Platform = process.platform): string {
     return platform === 'win32' ? `${name}.exe` : name;
 }

@@ -40,6 +40,7 @@
       "description": "未受信任时仅提供静态语言支持，不启动本地工具链。",
       "restrictedConfigurations": [
         "teal.toolchain.path",
+        "teal.toolchain.release",
         "teal.run.options",
         "teal.run.args",
         "teal.lsp.entryFiles"
@@ -132,6 +133,13 @@
         "enablement": "isWorkspaceTrusted && teal.supported"
       },
       {
+        "command": "teal.installToolchain",
+        "title": "安装 Teal 工具链",
+        "category": "Teal",
+        "icon": "$(cloud-download)",
+        "enablement": "isWorkspaceTrusted && teal.supported"
+      },
+      {
         "command": "teal.debugFile",
         "title": "调试当前文件",
         "category": "Teal",
@@ -161,6 +169,12 @@
           "default": "",
           "scope": "machine-overridable",
           "description": "工具链绝对目录：Windows 包含 teal.exe、teal-lsp.exe、teal-dap.exe；WSL 包含可执行的 teal、teal-lsp、teal-dap，路径使用 /mnt/d/...。留空从 PATH 选择同目录工具链；显式目录无效时不回退。"
+        },
+        "teal.toolchain.release": {
+          "type": "string",
+          "default": "latest",
+          "scope": "machine-overridable",
+          "description": "托管工具链的 Teal GitHub Release 标签；latest 使用最新发布版本。显式 teal.toolchain.path 始终优先。"
         },
         "teal.lsp.entryFiles": {
           "type": "array",

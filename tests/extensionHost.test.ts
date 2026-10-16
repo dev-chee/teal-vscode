@@ -36,7 +36,7 @@ export function run(): Promise<void> {
             const toolchain = process.env.TEAL_TOOLCHAIN_PATH;
             assert.ok(toolchain, 'TEAL_TOOLCHAIN_PATH must point at rebuilt Teal executables');
             await vscode.workspace.getConfiguration('teal').update('toolchain.path', toolchain, vscode.ConfigurationTarget.Global);
-            for (const command of ['teal.restartServer', 'teal.runFile', 'teal.debugFile', 'teal.showOutput', 'teal.openSettings']) {
+            for (const command of ['teal.restartServer', 'teal.installToolchain', 'teal.runFile', 'teal.debugFile', 'teal.showOutput', 'teal.openSettings']) {
                 assert.ok(!(await vscode.commands.getCommands(true)).includes(command), 'test requires a cold extension host before opening Teal');
             }
             const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-host-'));
@@ -49,7 +49,7 @@ export function run(): Promise<void> {
                 const extension = vscode.extensions.getExtension('dev-chee.teal-vscode');
                 assert.ok(extension, 'extension must be discoverable by its published identifier');
                 await waitFor(async () => extension.isActive ? extension : undefined, 'opening a Teal document must activate the extension without extension.activate()');
-                for (const command of ['teal.restartServer', 'teal.runFile', 'teal.debugFile', 'teal.showOutput', 'teal.openSettings']) {
+                for (const command of ['teal.restartServer', 'teal.installToolchain', 'teal.runFile', 'teal.debugFile', 'teal.showOutput', 'teal.openSettings']) {
                     assert.ok((await vscode.commands.getCommands(true)).includes(command), `${command} must be registered after language activation`);
                 }
             } finally {

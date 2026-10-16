@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { executableName, sameFilePath, supportsExecution } from '../src/platform';
+import { executableName, managedToolchainTarget, sameFilePath, supportsExecution } from '../src/platform';
 
 test('execution runs in local Windows or the WSL workspace host', () => {
     assert.equal(supportsExecution('win32', 'x64', undefined, true), true);
@@ -10,6 +10,13 @@ test('execution runs in local Windows or the WSL workspace host', () => {
     assert.equal(supportsExecution('linux', 'x64', undefined, true), false);
     assert.equal(supportsExecution('linux', 'x64', 'wsl', false), false);
     assert.equal(supportsExecution('linux', 'arm64', 'wsl', true), false);
+});
+
+test('managed toolchain targets follow the extension host', () => {
+    assert.equal(managedToolchainTarget('win32', 'x64', undefined, true), 'win32-x64');
+    assert.equal(managedToolchainTarget('linux', 'x64', 'wsl', true), 'linux-x64');
+    assert.equal(managedToolchainTarget('linux', 'x64', undefined, true), undefined);
+    assert.equal(managedToolchainTarget('linux', 'arm64', 'wsl', true), undefined);
 });
 
 test('WSL uses native executable names and preserves distinct case-sensitive files', () => {
