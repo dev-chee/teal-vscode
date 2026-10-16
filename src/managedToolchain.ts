@@ -29,13 +29,20 @@ function managedRoot(context: vscode.ExtensionContext): string {
     return path.join(context.globalStorageUri.fsPath, managedDirectoryName);
 }
 
-async function fetchRelease(release: string): Promise<ReleaseInfo> {
+async function fetchRelease(release: string, target: ManagedToolchainTarget): Promise<ReleaseInfo> {
     const response = await fetch(releaseApiUrl(release), {
         headers: { Accept: 'application/vnd.github+json', 'User-Agent': 'teal-vscode-extension' },
     });
     if (!response.ok) throw new Error(`Unable to find the Teal toolchain release (${response.status} ${response.statusText}).`);
-    const value = await response.json() as Partial<ReleaseInfo>;
-    if (typeof value.tag_name !== 'string' || !Array.isArray(value.assets)) throw new Error('The Teal toolchain release response is invalid.');
+    const value = await response.json() as Partial<ReleaseInfo> | Partial<ReleaseInfo>[];
+    if (release.trim() === '' || release.trim().toLowerCase() === 'latest') {
+        if (!Array.isArray(value)) throw new Error('The Teal toolchain release list response is invalid.');
+        const archiveName = releaseAssetName('teal', target);
+        const found = value.find((item) => typeof item.tag_name === 'string' && Array.isArray(item.assets) && item.assets.some((asset) => asset.name === archiveName));
+        if (!found || typeof found.tag_name !== 'string' || !Array.isArray(found.assets)) throw new Error(`No Teal toolchain release contains ${archiveName}.`);
+        return { tag_name: found.tag_name, assets: found.assets as ReleaseAsset[] };
+    }
+    if (Array.isArray(value) || typeof value.tag_name !== 'string' || !Array.isArray(value.assets)) throw new Error('The Teal toolchain release response is invalid.');
     return { tag_name: value.tag_name, assets: value.assets as ReleaseAsset[] };
 }
 
@@ -103,7 +110,7 @@ export async function installManagedToolchain(
     if (existing && existing.target === target && (release.trim() === '' || release.trim().toLowerCase() === 'latest' || existing.release === release.trim())) return existing;
 
     report?.('Reading the Teal toolchain release metadata…');
-    const releaseInfo = await fetchRelease(release);
+    const releaseInfo = await fetchRelease(release, target);
     const archiveName = releaseAssetName('teal', target);
     const archive = releaseInfo.assets.find((asset) => asset.name === archiveName);
     if (!archive) throw new Error(`The release ${releaseInfo.tag_name} does not contain ${archiveName}.`);

@@ -12,7 +12,7 @@ export interface ReleaseAsset {
 
 export function releaseApiUrl(release: string): string {
     return release.trim() === '' || release.trim().toLowerCase() === 'latest'
-        ? `https://api.github.com/repos/${repository}/releases/latest`
+        ? `https://api.github.com/repos/${repository}/releases?per_page=50`
         : `https://api.github.com/repos/${repository}/releases/tags/${encodeURIComponent(release.trim())}`;
 }
 
