@@ -1,5 +1,9 @@
 # Change Log
 
+## [0.1.2] - 2026-10-17
+
+- 将 Marketplace 显示名称改为 `Teal Language for VS Code`。
+
 ## [0.1.1] - 2026-10-17
 
 - 首次公开发布 Teal for Visual Studio Code。

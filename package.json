@@ -1,8 +1,8 @@
 {
   "name": "teal-vscode",
-  "displayName": "Teal Language Support by dev-chee",
+  "displayName": "Teal Language for VS Code",
   "description": "Teal 语言支持：本地语言服务器、运行和源码调试。",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "publisher": "dev-chee",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
