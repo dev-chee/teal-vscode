@@ -4,7 +4,15 @@
   "description": "Teal 语言支持：本地语言服务器、运行和源码调试。",
   "version": "0.1.1",
   "publisher": "dev-chee",
-  "license": "MIT",
+  "license": "SEE LICENSE IN LICENSE",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/dev-chee/teal-vscode-extension.git"
+  },
+  "homepage": "https://github.com/dev-chee/teal-vscode-extension#readme",
+  "bugs": {
+    "url": "https://github.com/dev-chee/teal-vscode-extension/issues"
+  },
   "engines": {
     "vscode": "^1.91.0"
   },

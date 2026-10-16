@@ -1,0 +1,135 @@
+name: Publish VS Code extension
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: marketplace-publish
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Set up pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 11
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Check tag matches package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag_version="${GITHUB_REF_NAME#v}"
+          package_version="$(node -p "require('./package.json').version")"
+          if [[ "$tag_version" != "$package_version" ]]; then
+            echo "Tag v${tag_version} does not match package.json version ${package_version}."
+            exit 1
+          fi
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm run typecheck
+
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Run unit tests
+        run: pnpm run test:unit
+
+      - name: Build extension
+        run: pnpm run build
+
+      - name: Package all desktop VSIX targets
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version="$(node -p "require('./package.json').version")"
+          mkdir -p target
+          targets=(
+            win32-x64
+            win32-arm64
+            linux-x64
+            linux-arm64
+            linux-armhf
+            alpine-x64
+            alpine-arm64
+            darwin-x64
+            darwin-arm64
+          )
+          for target in "${targets[@]}"; do
+            npx --yes @vscode/vsce@4.0.0 package \
+              --target "$target" \
+              --out "target/teal-vscode-${package_version}-${target}.vsix" \
+              --no-dependencies
+          done
+
+      - name: Verify all VSIX targets exist
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version="$(node -p "require('./package.json').version")"
+          targets=(
+            win32-x64
+            win32-arm64
+            linux-x64
+            linux-arm64
+            linux-armhf
+            alpine-x64
+            alpine-arm64
+            darwin-x64
+            darwin-arm64
+          )
+          for target in "${targets[@]}"; do
+            test -f "target/teal-vscode-${package_version}-${target}.vsix"
+          done
+
+      - name: Publish all desktop targets to Visual Studio Marketplace
+        shell: bash
+        run: |
+          set -euo pipefail
+          package_version="$(node -p "require('./package.json').version")"
+          targets=(
+            win32-x64
+            win32-arm64
+            linux-x64
+            linux-arm64
+            linux-armhf
+            alpine-x64
+            alpine-arm64
+            darwin-x64
+            darwin-arm64
+          )
+          packages=()
+          for target in "${targets[@]}"; do
+            packages+=("target/teal-vscode-${package_version}-${target}.vsix")
+          done
+          npx --yes @vscode/vsce@4.0.0 publish \
+            --packagePath "${packages[@]}"
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+
+      - name: Upload VSIX artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: teal-vscode-${{ github.ref_name }}
+          path: target/*.vsix
+          if-no-files-found: warn

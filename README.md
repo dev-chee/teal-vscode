@@ -179,4 +179,4 @@ TEAL_TOOLCHAIN_PATH=/mnt/d/teal-lang/target/debug pnpm run test:toolchain
 - `toolchain.ts`、`platform.ts` 处理工具发现和平台路径规则；`reporting.ts` 集中处理日志、通知和命令错误。
 - 核心单测直接调用这些模块；`toolchain.integration.ts` 通过标准协议连接真实工具，编辑器交互测试保留在 `extensionHost.test.ts`。
 
-测试环境与实际验收结果见测试入口及 `target/test-gate/local-vscode/` 下生成的报告；报告目录和 VSIX 是本地产物，不纳入 Git。发布、下载和自动更新留待后续实现。
+测试环境与实际验收结果见测试入口及 `target/test-gate/local-vscode/` 下生成的报告；报告目录和 VSIX 是本地产物，不纳入 Git。发布流程见 [`PUBLISHING.md`](PUBLISHING.md)，向 GitHub 推送匹配 `package.json` 版本的 `v*` 标签即可触发 Marketplace 发布。
