@@ -51,10 +51,12 @@ test('declaration names, receiver, wildcard and namespace paths have dedicated s
     for (const source of ['pub fn identity<T>(value: T) -> T {}', 'task identity<T>() -> T {}']) {
         expectScope(source, 'identity', 'entity.name.function.teal');
     }
-    for (const keyword of ['class', 'enum', 'trait', 'agent']) {
+    for (const keyword of ['class', 'struct', 'enum', 'trait', 'agent']) {
         expectScope(`${keyword} Example {}`, 'Example', 'entity.name.type.teal');
         expectScope(`${keyword} lower_case {}`, 'lower_case', 'entity.name.type.teal');
     }
+    expectScope('type PointList = Point[];', 'PointList', 'entity.name.type.teal');
+    expectScope('trait Collection { type Item; }', 'Item', 'entity.name.type.teal');
     expectScope('pub const LIMIT = 3;', 'LIMIT', 'variable.other.constant.teal');
     expectScope('return self.value;', 'self', 'variable.language.teal');
     expectScope('match result { _ => 0 }', '_', 'constant.language.teal');

@@ -42,7 +42,7 @@
           }
         },
         {
-          "match": "\\b(class|enum|trait|agent)\\s+([A-Za-z_][A-Za-z0-9_]*)",
+          "match": "\\b(class|struct|enum|trait|agent|type)\\s+([A-Za-z_][A-Za-z0-9_]*)",
           "captures": {
             "1": { "name": "storage.type.teal" },
             "2": { "name": "entity.name.type.teal" }
