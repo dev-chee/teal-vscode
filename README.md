@@ -51,6 +51,8 @@ cargo build --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-da
 
 `.tl` 使用 Teal 语言服务；`.tli`（包括 `builtin.tli`、`builtins.tli`）使用独立的 Teal Interface 声明高亮，支持 `builtin`、泛型、函数和 task 签名。接口文件不作为可执行源码提交给 LSP，也不显示运行/调试按钮。
 
+无需工具链即可获得静态语法高亮：支持 `@optimization` 等配置属性、自定义及限定名属性、`reflect(...).@Attribute` 投影、函数和类型声明名、常量声明、命名空间、`self`、通配符 `_`，以及字符串插值中的变量和字段路径。实际颜色由主题决定；启用语义高亮后，语言服务器返回的分类可能覆盖静态颜色。
+
 提供补全、诊断、悬停、签名帮助、定义、引用、重命名、文档及工作区符号、格式化和语义高亮。语言行为完全由本地 `teal-lsp` 决定；格式化固定使用四空格和 LF，语法不完整时可能返回空编辑。
 
 `teal.lsp.entryFiles` 接受根分析文件数组，相对路径以所属工作区文件夹为基准；工作区外的文件使用父目录。留空时由服务端识别顶层 `fn main()` 或 `task main()`。使用现有 `entryFiles`，不使用已移除的 `entryPoints`。

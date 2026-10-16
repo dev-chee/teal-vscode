@@ -12,7 +12,7 @@
     { "name": "storage.modifier.teal", "match": "\\bbuiltin\\b" },
     { "name": "entity.name.namespace.teal", "match": "\\bglobal\\b" },
     { "name": "support.type.teal", "match": "\\b(?:any|number|printable|[A-Z][A-Za-z_0-9]*)\\b" },
-    { "name": "entity.other.attribute-name.teal", "match": "@[A-Za-z_][A-Za-z_0-9]*" },
+    { "include": "source.teal#attributes" },
     { "include": "source.teal" }
   ]
 }
