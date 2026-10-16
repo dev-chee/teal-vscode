@@ -1,7 +1,7 @@
 import { createHash } from 'node:crypto';
 import type { ManagedToolchainTarget } from './platform';
 
-const repository = 'dev-chee/teal-lang';
+const repository = 'dev-chee/teal-vscode-extension';
 
 export interface ReleaseAsset {
     name: string;

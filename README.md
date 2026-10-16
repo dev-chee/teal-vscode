@@ -26,7 +26,7 @@ cargo build --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-da
 
 配置为空时，按 PATH 顺序寻找第一个包含全部三项工具的目录；没有完整目录时使用第一个包含至少一项工具的目录。缺少工具仅停用对应功能，不跨目录拼接版本。显式目录无效时直接提示，不回退 PATH。PATH 中的空项或相对目录不参与查找；变更系统 PATH 后需要重启 VS Code。
 
-如果没有找到显式目录或 PATH 工具链，在受信任工作区执行 **Teal: 安装 Teal 工具链**。命令从 `dev-chee/teal-lang` 的 GitHub Release 下载当前宿主对应的完整发行归档，并校验 GitHub 提供的 SHA-256 digest。归档内必须包含完整运行时和以下三个入口：
+如果没有找到显式目录或 PATH 工具链，在受信任工作区执行 **Teal: 安装 Teal 工具链**。命令从 `dev-chee/teal-vscode-extension` 的公开 GitHub Release 下载当前宿主对应的完整发行归档，并校验 GitHub 提供的 SHA-256 digest。归档内必须包含完整运行时和以下三个入口：
 
 - Windows x64：`teal-win32-x64.zip`
 - WSL Linux x64：`teal-linux-x64.tar.gz`
