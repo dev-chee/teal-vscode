@@ -70,7 +70,14 @@ jobs:
           if (-not $asset.digest -or $asset.digest -notmatch '^sha256:[0-9a-fA-F]{64}$') { throw "$($asset.name) has no valid SHA-256 digest." }
 
           $distro = ((wsl.exe --list --quiet | Out-String) -replace "`0", '') -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -First 1
-          if (-not $distro) { throw 'The Windows runner has no WSL distribution installed.' }
+          if (-not $distro) {
+            $distro = 'TealUbuntu'
+            $rootfs = Join-Path $env:RUNNER_TEMP 'ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz'
+            $installRoot = Join-Path $env:RUNNER_TEMP 'teal-wsl-rootfs'
+            Invoke-WebRequest -Uri 'https://cloud-images.ubuntu.com/wsl/releases/24.04/current/ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz' -OutFile $rootfs
+            New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
+            wsl.exe --import $distro $installRoot $rootfs --version 2
+          }
           $arch = ((wsl.exe -d $distro -- uname -m | Out-String) -replace "`0", '').Trim()
           if ($arch -ne 'x86_64') { throw "WSL distribution $distro is $arch, expected x86_64." }
 
