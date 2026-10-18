@@ -13,7 +13,101 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  # Toolchain archives are verified before Marketplace publication. Both jobs
+  # resolve the newest release containing the required platform asset so a
+  # newer extension release cannot accidentally shadow the toolchain release.
+  verify-toolchain-windows:
+    runs-on: windows-latest
+
+    steps:
+      - name: Verify Windows toolchain asset
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            Accept = 'application/vnd.github+json'
+            'User-Agent' = 'teal-vscode-extension'
+          }
+          $releases = Invoke-RestMethod -Headers $headers -Uri 'https://api.github.com/repos/dev-chee/teal-vscode-extension/releases?per_page=50'
+          $release = $releases | Where-Object { $_.assets | Where-Object { $_.name -eq 'teal-win32-x64.zip' } } | Select-Object -First 1
+          if (-not $release) { throw 'No public toolchain release contains teal-win32-x64.zip.' }
+          $asset = $release.assets | Where-Object name -eq 'teal-win32-x64.zip' | Select-Object -First 1
+          if (-not $asset.digest -or $asset.digest -notmatch '^sha256:[0-9a-fA-F]{64}$') { throw "$($asset.name) has no valid SHA-256 digest." }
+
+          $archive = Join-Path $env:RUNNER_TEMP $asset.name
+          Invoke-WebRequest -Headers $headers -Uri $asset.browser_download_url -OutFile $archive
+          $expected = $asset.digest.Substring(7).ToLowerInvariant()
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "SHA-256 mismatch for $($asset.name): expected $expected, got $actual." }
+
+          $extract = Join-Path $env:RUNNER_TEMP 'teal-toolchain-windows'
+          if (Test-Path -LiteralPath $extract) { Remove-Item -LiteralPath $extract -Recurse -Force }
+          Expand-Archive -LiteralPath $archive -DestinationPath $extract
+          foreach ($tool in @('teal.exe', 'teal-lsp.exe', 'teal-dap.exe')) {
+            $matches = @(Get-ChildItem -LiteralPath $extract -Recurse -File -Filter $tool)
+            if ($matches.Count -ne 1) { throw "Expected exactly one $tool in the Windows toolchain archive." }
+            if (-not $matches[0].Length) { throw "$tool is empty." }
+          }
+          Write-Host "Verified $($release.tag_name): $($asset.name) ($actual)"
+
+  verify-toolchain-wsl:
+    runs-on: windows-latest
+
+    steps:
+      - name: Verify WSL Linux x64 toolchain asset
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $headers = @{
+            Accept = 'application/vnd.github+json'
+            'User-Agent' = 'teal-vscode-extension'
+          }
+          $releases = Invoke-RestMethod -Headers $headers -Uri 'https://api.github.com/repos/dev-chee/teal-vscode-extension/releases?per_page=50'
+          $release = $releases | Where-Object { $_.assets | Where-Object { $_.name -eq 'teal-linux-x64.tar.gz' } } | Select-Object -First 1
+          if (-not $release) { throw 'No public toolchain release contains teal-linux-x64.tar.gz.' }
+          $asset = $release.assets | Where-Object name -eq 'teal-linux-x64.tar.gz' | Select-Object -First 1
+          if (-not $asset.digest -or $asset.digest -notmatch '^sha256:[0-9a-fA-F]{64}$') { throw "$($asset.name) has no valid SHA-256 digest." }
+
+          $distro = ((wsl.exe --list --quiet | Out-String) -replace "`0", '') -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -First 1
+          if (-not $distro) { throw 'The Windows runner has no WSL distribution installed.' }
+          $arch = ((wsl.exe -d $distro -- uname -m | Out-String) -replace "`0", '').Trim()
+          if ($arch -ne 'x86_64') { throw "WSL distribution $distro is $arch, expected x86_64." }
+
+          $archive = Join-Path $env:RUNNER_TEMP $asset.name
+          Invoke-WebRequest -Headers $headers -Uri $asset.browser_download_url -OutFile $archive
+          $expected = $asset.digest.Substring(7).ToLowerInvariant()
+          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
+          if ($actual -ne $expected) { throw "SHA-256 mismatch for $($asset.name): expected $expected, got $actual." }
+
+          $linuxArchive = "/mnt/$($archive.Substring(0, 1).ToLowerInvariant())$($archive.Substring(2).Replace('\', '/'))"
+          $script = @'
+          set -eu
+          archive="$1"
+          expected="$2"
+          root="$(mktemp -d)"
+          trap 'rm -rf "$root"' EXIT
+          actual="$(sha256sum "$archive" | awk '{print $1}')"
+          test "$actual" = "$expected"
+          mkdir "$root/extracted"
+          tar -xzf "$archive" -C "$root/extracted"
+          teal="$(find "$root/extracted" -type f -name teal -print -quit)"
+          test -n "$teal"
+          tool_root="$(dirname "$teal")"
+          test -x "$tool_root/teal"
+          test -x "$tool_root/teal-lsp"
+          test -x "$tool_root/teal-dap"
+          "$tool_root/teal" --version
+          '@
+          $scriptPath = Join-Path $env:RUNNER_TEMP 'verify-wsl-toolchain.sh'
+          [System.IO.File]::WriteAllText($scriptPath, $script.Replace("`r`n", "`n"))
+          $linuxScript = "/mnt/$($scriptPath.Substring(0, 1).ToLowerInvariant())$($scriptPath.Substring(2).Replace('\', '/'))"
+          wsl.exe -d $distro -- bash $linuxScript $linuxArchive $expected
+          Write-Host "Verified $($release.tag_name): $($asset.name) ($actual) in WSL $distro"
+
   publish:
+    needs:
+      - verify-toolchain-windows
+      - verify-toolchain-wsl
     runs-on: ubuntu-latest
 
     steps:
