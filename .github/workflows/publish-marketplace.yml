@@ -4,6 +4,7 @@ on:
   push:
     tags:
       - 'v*'
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -105,6 +106,7 @@ jobs:
           Write-Host "Verified $($release.tag_name): $($asset.name) ($actual) in WSL $distro"
 
   publish:
+    if: github.event_name == 'push'
     needs:
       - verify-toolchain-windows
       - verify-toolchain-wsl
@@ -126,6 +128,7 @@ jobs:
           cache: pnpm
 
       - name: Check tag matches package version
+        if: github.event_name == 'push'
         shell: bash
         run: |
           set -euo pipefail
