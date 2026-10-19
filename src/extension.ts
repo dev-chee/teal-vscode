@@ -2,6 +2,7 @@ import * as vscode from 'vscode';
 import { isSupported, requireExecution, setManagedToolchainDirectory } from './environment';
 import { DebugAdapter, DebugConfigurations, debugFile, runFile } from './execution';
 import { LanguageClients } from './languageClient';
+import { disposeLanguageServerExecutables } from './languageServerExecutable';
 import { currentManagedToolchainTarget, installManagedToolchain, loadManagedToolchain } from './managedToolchain';
 import { Reporter } from './reporting';
 
@@ -56,4 +57,5 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
 export async function deactivate(): Promise<void> {
     await clients?.dispose();
     clients = undefined;
+    await disposeLanguageServerExecutables();
 }

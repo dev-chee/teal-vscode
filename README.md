@@ -11,14 +11,14 @@
 插件不会在激活时静默下载工具链。可以先在 Teal 源码仓库构建：
 
 ```powershell
-cargo build --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-dap
+cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-dap
 ```
 
 在 VS Code 设置中搜索 `teal.toolchain.path`，填写构建输出的**绝对目录**，例如：
 
 ```json
 {
-    "teal.toolchain.path": "D:\\teal-lang\\target\\debug"
+    "teal.toolchain.path": "D:\\teal-lang\\target\\release"
 }
 ```
 
@@ -41,14 +41,14 @@ cargo build --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-da
 
 ```bash
 cd /mnt/d/teal-lang
-cargo build --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-dap
+cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-dap
 ```
 
 在 WSL 远程设置中配置：
 
 ```json
 {
-    "teal.toolchain.path": "/mnt/d/teal-lang/target/debug"
+    "teal.toolchain.path": "/mnt/d/teal-lang/target/release"
 }
 ```
 
@@ -63,6 +63,8 @@ cargo build --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-da
 提供补全、诊断、悬停、签名帮助、定义、引用、重命名、文档及工作区符号、格式化和语义高亮。语言行为完全由本地 `teal-lsp` 决定；格式化固定使用四空格和 LF，语法不完整时可能返回空编辑。
 
 配套的 `teal-lsp` 区分属性、函数与方法、参数、字段、枚举成员、类型和泛型参数，并标记常量与声明；字符串、插值及转义继续使用静态高亮。服务端更新需要重新构建对应环境的 `teal-lsp`，然后执行 **Teal: 重启语言服务器**；仅更新扩展不会替换本地工具链。
+
+Windows 本地启动语言服务器前会将 `teal-lsp.exe` 复制到临时目录再运行，因此 `teal-lang\target\release` 中的文件不会被语言服务器进程占用，构建期间可以直接替换它。
 
 `teal.lsp.entryFiles` 接受根分析文件数组，相对路径以所属工作区文件夹为基准；工作区外的文件使用父目录。留空时由服务端识别顶层 `fn main()` 或 `task main()`。使用现有 `entryFiles`，不使用已移除的 `entryPoints`。
 
@@ -163,7 +165,7 @@ pnpm run typecheck
 pnpm run lint
 pnpm run build
 pnpm run test:unit
-$env:TEAL_TOOLCHAIN_PATH = 'D:\teal-lang\target\debug'
+$env:TEAL_TOOLCHAIN_PATH = 'D:\teal-lang\target\release'
 $env:VSCODE_EXECUTABLE_PATH = 'C:\Program Files\Microsoft VS Code\Code.exe'
 pnpm test
 pnpm run package
@@ -174,7 +176,7 @@ pnpm run package
 在 WSL 中验证真实工具链：
 
 ```bash
-TEAL_TOOLCHAIN_PATH=/mnt/d/teal-lang/target/debug pnpm run test:toolchain
+TEAL_TOOLCHAIN_PATH=/mnt/d/teal-lang/target/release pnpm run test:toolchain
 ```
 
 `test:toolchain` 在 Windows/Linux 均可运行，覆盖 CLI 参数与输入、嵌套工作区 LSP 刷新、DAP 启动/暂停/继续；它不替代 VS Code 扩展宿主端到端测试。测试入口会重新编译并清理旧测试产物，避免已删除的测试继续运行。

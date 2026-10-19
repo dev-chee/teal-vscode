@@ -2,7 +2,7 @@
   "name": "teal-vscode",
   "displayName": "Teal Language for VS Code",
   "description": "Teal 语言支持：本地语言服务器、运行和源码调试。",
-  "version": "0.1.4",
+  "version": "0.1.5",
   "publisher": "dev-chee",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {

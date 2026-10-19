@@ -5,6 +5,7 @@ import { stringArray } from './configuration';
 import { isLocalTealDocument } from './documents';
 import { executable, isSupported } from './environment';
 import { LanguageSessions, type LanguageGroup, type LanguageSession } from './languageSessions';
+import { languageServerEnvironment, releaseLanguageServerExecutable, stageLanguageServerExecutable } from './languageServerExecutable';
 import type { Reporter } from './reporting';
 
 interface Group extends LanguageGroup {
@@ -50,7 +51,9 @@ export class LanguageClients {
     }
 
     private async start(group: Group): Promise<LanguageSession> {
-        const command = await executable('teal-lsp', group.folder.uri);
+        const sourceCommand = await executable('teal-lsp', group.folder.uri);
+        const command = await stageLanguageServerExecutable(sourceCommand);
+        const environment = await languageServerEnvironment(sourceCommand);
         const config = vscode.workspace.getConfiguration('teal', group.folder.uri);
         const entryFiles = stringArray(config.get('lsp.entryFiles', []), 'teal.lsp.entryFiles').map((file) => path.resolve(group.root, file));
         const options: LanguageClientOptions = {
@@ -67,7 +70,7 @@ export class LanguageClients {
                 },
             },
         };
-        const client = new LanguageClient('teal', `Teal (${group.folder.name})`, { command, args: [], options: { cwd: group.root } }, options);
+        const client = new LanguageClient('teal', `Teal (${group.folder.name})`, { command, args: [], options: { cwd: group.root, env: environment } }, options);
         let started = false;
         let stopping = false;
         const subscription = client.onDidChangeState((event) => {
@@ -80,7 +83,13 @@ export class LanguageClients {
         const watcher = vscode.Disposable.from(fileWatcher, fileWatcher.onDidCreate(changed), fileWatcher.onDidDelete(changed), fileWatcher.onDidChange(changed));
         const session: LanguageSession = {
             isRunning: () => client.state === State.Running,
-            dispose: async () => { stopping = true; subscription.dispose(); watcher.dispose(); await client.dispose(); },
+            dispose: async () => {
+                stopping = true;
+                subscription.dispose();
+                watcher.dispose();
+                try { await client.dispose(); }
+                finally { await releaseLanguageServerExecutable(command); }
+            },
         };
         this.reporter.output.appendLine(`[LSP] Starting ${command} in ${group.root}`);
         try { await client.start(); started = true; return session; }
