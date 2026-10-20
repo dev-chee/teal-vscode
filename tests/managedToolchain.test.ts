@@ -4,7 +4,7 @@ import { createHash } from 'node:crypto';
 import { parseSha256Digest, releaseAssetName, releaseApiUrl, validateAssetUrl, verifySha256 } from '../src/toolchainDownloadCore';
 
 test('managed toolchain release URLs and asset names are deterministic', () => {
-    assert.equal(releaseApiUrl('latest'), 'https://api.github.com/repos/dev-chee/teal/releases?per_page=50');
+    assert.equal(releaseApiUrl('latest'), 'https://api.github.com/repos/dev-chee/teal/releases?per_page=100&page=1');
     assert.equal(releaseApiUrl('v0.1.0'), 'https://api.github.com/repos/dev-chee/teal/releases/tags/v0.1.0');
     assert.equal(releaseAssetName('teal', 'win32-x64'), 'teal-win32-x64.zip');
     assert.equal(releaseAssetName('teal-lsp', 'linux-x64'), 'teal-linux-x64.tar.gz');

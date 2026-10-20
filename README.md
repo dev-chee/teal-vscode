@@ -37,7 +37,7 @@ cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --b
 
 平台按扩展宿主的操作系统、架构和 libc/ARM ABI 选择；无法确认 ABI 时仍可配置本地工具链，但不会猜测托管归档。下载源尚未发布对应平台时，安装会明确失败，不下载其他架构代替。
 
-托管工具链安装到扩展宿主的全局存储目录。`teal.toolchain.path` 始终优先；空配置时优先使用完整 PATH 工具链，再使用已安装的托管工具链。`teal.toolchain.release` 默认为 `latest`，也可以填写固定 Release 标签。下载源必须提供对应平台归档及 SHA-256 digest，归档必须包含完整发行目录和四个入口，否则安装会失败并保持现有工具链不变。
+托管工具链安装到扩展宿主的全局存储目录。`teal.toolchain.path` 始终优先；空配置时优先使用完整 PATH 工具链，再使用已安装的托管工具链。`teal.toolchain.release` 默认为 `latest`，与 CI 共用分页和完整正式 Release 筛选规则；固定标签也必须包含全部 9 个目标归档。重新执行安装会先解析 Release，再按解析版本复用缓存，避免 `latest` 永久停留旧版本。下载源必须提供对应平台归档及 SHA-256 digest，归档必须包含完整发行目录和四个入口，否则安装会失败并保持现有工具链不变。
 
 插件仅在受信任工作区启动进程。未受信任时仍可使用语法高亮、括号和代码片段。远程工作区中扩展运行在工作区宿主，工具链、源码路径和终端均位于该宿主。浏览器连接 Codespaces 时使用远程 Node.js 宿主；纯浏览器宿主和虚拟文件系统暂不支持原生进程。
 
@@ -196,6 +196,8 @@ TEAL_TOOLCHAIN_PATH=/mnt/d/teal-lang/target/release pnpm run test:toolchain
 - 核心单测直接调用这些模块；`toolchain.integration.ts` 通过标准协议连接真实工具，编辑器交互测试保留在 `extensionHost.test.ts`。
 
 测试环境与实际验收结果见测试入口及 `target/test-gate/local-vscode/` 下生成的报告；报告目录和 VSIX 是本地产物，不纳入 Git。发布流程见 [`PUBLISHING.md`](PUBLISHING.md)，向 GitHub 推送匹配 `package.json` 版本的 `v*` 标签即可触发 Marketplace 发布。
+
+macOS 中，由 Teal 程序通过 Host 启动的原生 Mach-O 进程使用冻结的私有执行镜像；可执行文件相对资源和动态库路径需要显式配置。VS Code 直接启动工具链的路径保持不变，具体约束见 [Host 文档](https://github.com/dev-chee/teal/blob/main/crates/teal-host/README.md)。
 
 ## 全平台 CI
 

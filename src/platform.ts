@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { realpath, stat } from 'node:fs/promises';
 import distribution from './toolchain-targets.json';
 
 export type ManagedToolchainTarget = keyof typeof distribution.targets;
@@ -34,8 +35,15 @@ export function executableName(name: string, platform: NodeJS.Platform = process
     return platform === 'win32' ? `${name}.exe` : name;
 }
 
-export function sameFilePath(left: string, right: string, platform: NodeJS.Platform = process.platform): boolean {
-    return platform === 'win32' ? left.toLowerCase() === right.toLowerCase() : left === right;
+/** 用实际文件身份处理 APFS 大小写与 Unicode 别名，不合并不同文件。 */
+export async function sameFilePath(left: string, right: string): Promise<boolean> {
+    if (left === right) return true;
+    try {
+        const [a, b] = await Promise.all([stat(left, { bigint: true }), stat(right, { bigint: true })]);
+        if (a.dev !== 0n && b.dev !== 0n && a.ino !== 0n && b.ino !== 0n) return a.dev === b.dev && a.ino === b.ino;
+        const [canonicalLeft, canonicalRight] = await Promise.all([realpath(left), realpath(right)]);
+        return canonicalLeft === canonicalRight;
+    } catch { return false; }
 }
 
 /** 按宿主平台的路径规则判断包含关系，不能用字符串前缀识别工作区。 */

@@ -1,8 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { ManagedToolchainTarget } from './platform';
 import distribution from './toolchain-targets.json';
+import { createReleasePolicy } from './toolchainReleaseCore.cjs';
 
-const repository = distribution.repository;
+const releasePolicy = createReleasePolicy(distribution);
+export const selectToolchainRelease = releasePolicy.selectRelease;
+export const readToolchainRelease = releasePolicy.readRelease;
 
 export interface ReleaseAsset {
     name: string;
@@ -12,14 +15,12 @@ export interface ReleaseAsset {
 }
 
 export function releaseApiUrl(release: string): string {
-    return release.trim() === '' || release.trim().toLowerCase() === 'latest'
-        ? `https://api.github.com/repos/${repository}/releases?per_page=50`
-        : `https://api.github.com/repos/${repository}/releases/tags/${encodeURIComponent(release.trim())}`;
+    return releasePolicy.apiUrl(release);
 }
 
 export function releaseAssetName(tool: string, target: ManagedToolchainTarget): string {
     void tool;
-    return `teal-${target}${target.startsWith('win32-') ? '.zip' : '.tar.gz'}`;
+    return releasePolicy.archiveName(target);
 }
 
 export function parseSha256Digest(digest: string | undefined): string | undefined {

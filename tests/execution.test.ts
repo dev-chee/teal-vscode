@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { link, mkdtemp, readFile, rename, rm, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
+import { saveProgram } from '../src/documents';
+import { sameFilePath } from '../src/platform';
 import { prepareDebugConfiguration } from '../src/debugOptions';
 
 test('launch saves the file document even when a Git revision with the same path comes first', async () => {
@@ -41,5 +43,47 @@ test('launch saves the file document even when a Git revision with the same path
         documents.splice(1);
         await prepareDebugConfiguration({ ...config }, context);
         assert.equal(saves, 2, 'a closed program may run from disk without saving the revision document');
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('launch matches disk aliases and rejects aliases split by atomic saves', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'teal-launch-identity-'));
+    const program = path.join(root, 'main.tl');
+    const alias = path.join(root, 'linked-main.tl');
+    try {
+        await writeFile(program, 'old');
+        await link(program, alias);
+        let saves = 0;
+        const document = { uri: { scheme: 'file', fsPath: alias }, isDirty: true, isClosed: false,
+            async save() { saves++; await writeFile(alias, 'new'); return true; } };
+        assert.equal(await sameFilePath(program, alias), true);
+        await saveProgram(program, [document]);
+        assert.equal(saves, 1);
+        assert.equal(await readFile(program, 'utf8'), 'new');
+        // 编辑器原子保存会拆开硬链接；调试不能静默运行另一端的旧内容。
+        document.save = async () => { const replacement = path.join(root, 'replacement'); await writeFile(replacement, 'changed'); await rename(replacement, alias); return true; };
+        await assert.rejects(saveProgram(program, [document]), /no longer identifies/);
+        assert.equal(await sameFilePath(program, alias), false);
+        saves = 0;
+        document.save = async () => { saves++; return true; };
+        await saveProgram(program, [document]);
+        assert.equal(saves, 0, 'distinct files on case-sensitive volumes must remain distinct');
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('native case-insensitive volumes save alternate spelling of the launch path', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'teal-launch-case-'));
+    const canonical = path.join(root, 'Main.tl');
+    const alternate = path.join(root, 'main.tl');
+    try {
+        await writeFile(canonical, 'old');
+        const aliasExists = await stat(alternate).then(() => true, () => false);
+        if (!aliasExists) await writeFile(alternate, 'separate');
+        let saves = 0;
+        const document = { uri: { scheme: 'file', fsPath: canonical }, isDirty: true, isClosed: false,
+            async save() { saves++; await writeFile(canonical, 'new'); return true; } };
+        await saveProgram(alternate, [document]);
+        assert.equal(saves, aliasExists ? 1 : 0);
+        assert.equal(await readFile(alternate, 'utf8'), aliasExists ? 'new' : 'separate');
     } finally { await rm(root, { recursive: true, force: true }); }
 });

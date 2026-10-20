@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { executableName, isToolchainTarget, managedToolchainTarget, sameFilePath, supportsExecution, toolchainTargets } from '../src/platform';
+import { executableName, isToolchainTarget, managedToolchainTarget, supportsExecution, toolchainTargets } from '../src/platform';
 import { currentToolchainTarget, linuxLibc } from '../src/hostPlatform';
 
 test('native workspace execution covers local and remote Windows, Linux and macOS hosts', () => {
@@ -38,12 +38,10 @@ test('libc detection requires positive runtime evidence', () => {
     assert.equal(linuxLibc({}, [], false), 'unknown');
 });
 
-test('native executable naming and path comparisons follow the workspace host', () => {
+test('native executable naming follows the workspace host', () => {
     assert.equal(executableName('teal-lsp', 'win32'), 'teal-lsp.exe');
     assert.equal(executableName('teal-lsp', 'linux'), 'teal-lsp');
     assert.equal(executableName('teal-dap', 'darwin'), 'teal-dap');
-    assert.equal(sameFilePath('/tmp/Main.tl', '/tmp/main.tl', 'linux'), false);
-    assert.equal(sameFilePath('D:\\Teal\\Main.tl', 'd:\\teal\\main.tl', 'win32'), true);
 });
 
 test('CI runtime architecture and ABI match the requested distribution', () => {
