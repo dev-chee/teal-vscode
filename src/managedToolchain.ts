@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -103,8 +103,13 @@ export async function installManagedToolchain(
     const archive = releaseInfo.assets.find((asset) => asset.name === archiveName);
     if (!archive) throw new Error(`The release ${releaseInfo.tag_name} does not contain ${archiveName}.`);
 
-    const staging = path.join(root, `.staging-${randomUUID()}`);
-    const finalDirectory = path.join(root, releaseInfo.tag_name, target);
+    const installationId = randomUUID();
+    const staging = path.join(root, `.staging-${installationId}`);
+    // 每次安装独立成代，避免修复同标签时删除仍被其他窗口或进程使用的目录。
+    const finalDirectory = path.join(root, 'installations', `${target}-${installationId}`);
+    const state: ManagedState = { directory: finalDirectory, release: releaseInfo.tag_name, target };
+    let publicationAttempted = false;
+    let committed = false;
     try {
         await mkdir(staging, { recursive: true });
         const archivePath = path.join(staging, archive.name);
@@ -118,13 +123,41 @@ export async function installManagedToolchain(
         // 完成与 CI 相同的分发校验后，才允许替换目录和发布 current.json。
         await verifyToolchainDistribution(toolchainRoot, target);
         await mkdir(path.dirname(finalDirectory), { recursive: true });
-        await rm(finalDirectory, { recursive: true, force: true });
         await rename(toolchainRoot, finalDirectory);
-        const state: ManagedState = { directory: finalDirectory, release: releaseInfo.tag_name, target };
-        await writeFile(path.join(root, 'current.json'), JSON.stringify(state, null, 2), 'utf8');
+        const temporaryState = path.join(staging, 'selection.json');
+        const file = await open(temporaryState, 'wx', 0o600);
+        try {
+            await file.writeFile(JSON.stringify(state, null, 2), 'utf8');
+            await file.sync();
+        } catch (error) {
+            try { await file.close(); }
+            catch (closeError) { throw new AggregateError([error, closeError], `State write failed: ${String(error)}; closing the state file also failed.`, { cause: closeError }); }
+            throw error;
+        }
+        await file.close();
+        publicationAttempted = true;
+        try {
+            await rename(temporaryState, path.join(root, 'current.json'));
+        } catch (error) {
+            // I/O 报错可能发生在替换生效之后；读回确认，不能删除可能已被选中的代次。
+            const selected = await readFile(path.join(root, 'current.json'), 'utf8')
+                .then(value => parseManagedState(JSON.parse(value), target)).catch(() => undefined);
+            if (selected?.directory !== state.directory || selected.release !== state.release) throw error;
+        }
+        committed = true;
         return state;
+    } catch (error) {
+        const cleanupErrors: unknown[] = [];
+        // 发布之前的候选代次从未可见，可以安全回滚；发布结果不确定时保留数据。
+        if (!publicationAttempted) {
+            await rm(finalDirectory, { recursive: true, force: true }).catch(cleanup => cleanupErrors.push(cleanup));
+        }
+        await rm(staging, { recursive: true, force: true }).catch(cleanup => cleanupErrors.push(cleanup));
+        if (cleanupErrors.length) throw new AggregateError([error, ...cleanupErrors], `Toolchain installation failed: ${String(error)}; cleanup also failed.`, { cause: error });
+        throw error;
     } finally {
-        await rm(staging, { recursive: true, force: true });
+        // 提交之后的临时文件清理失败不能把已成功的安装报告为失败。
+        if (committed) await rm(staging, { recursive: true, force: true }).catch(() => {});
     }
 }
 

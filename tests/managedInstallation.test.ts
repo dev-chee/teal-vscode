@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -92,7 +93,7 @@ test('real installer rejects invalid distributions without changing the previous
             assert.equal(await readFile(statePath(ctx), 'utf8'), before, defect);
             assert.equal(await loadManagedToolchain(ctx), installed.directory, defect);
             assert.equal(await readFile(path.join(installed.directory, 'runtime/resource.txt'), 'utf8'), 'runtime valid-v1');
-            assert.deepEqual((await readdir(path.dirname(statePath(ctx)))).sort(), ['current.json', 'valid-v1']);
+            assert.deepEqual((await readdir(path.dirname(statePath(ctx)))).sort(), ['current.json', 'installations']);
         }
     } finally { await rm(root, { recursive: true, force: true }); }
 });
@@ -112,9 +113,257 @@ test('real installer repairs corrupt runtime and empty executables in a same-tag
         for (const file of ['runtime/resource.txt', executableName('teal')]) {
             await writeFile(path.join(installed.directory, file), '');
             assert.equal(await loadManagedToolchain(ctx), undefined, file);
-            assert.deepEqual(await installManagedToolchain(ctx, 'latest', nativeTarget), installed);
-            assert.equal(await loadManagedToolchain(ctx), installed.directory);
+            const repaired = await installManagedToolchain(ctx, 'latest', nativeTarget);
+            assert.notEqual(repaired.directory, installed.directory);
+            assert.equal(repaired.release, installed.release);
+            assert.equal(await loadManagedToolchain(ctx), repaired.directory);
+            installed.directory = repaired.directory;
         }
         assert.equal(downloads, 3);
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+type CommitFault = 'move' | 'open' | 'write' | 'sync' | 'close' | 'publish';
+
+test('real installer preserves the old selection on commit I/O failures and can retry', async t => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-install-rollback-')));
+    try {
+        const old = await archive(root, 'v1');
+        const next = await archive(root, 'v2');
+        let selected = old;
+        t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => String(input).startsWith('https://api.github.com/')
+            ? Response.json([selected.release]) : new Response(selected.bytes));
+        const ctx = context(root);
+        const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
+        const before = await readFile(statePath(ctx), 'utf8');
+        selected = next;
+        const realOpen = fs.open.bind(fs);
+        const realRename = fs.rename.bind(fs);
+        for (const fault of ['move', 'open', 'write', 'sync', 'close', 'publish'] as CommitFault[]) {
+            await t.test(fault, async sub => {
+                const failure = Object.assign(new Error(`injected ${fault}`), { code: fault === 'write' ? 'ENOSPC' : 'EACCES' });
+                sub.mock.method(fs, 'rename', async (...[source, destination]: Parameters<typeof fs.rename>) => {
+                    if ((fault === 'move' && String(destination).includes(`${path.sep}installations${path.sep}`))
+                        || (fault === 'publish' && String(destination) === statePath(ctx))) throw failure;
+                    return realRename(source, destination);
+                });
+                sub.mock.method(fs, 'open', async (...args: Parameters<typeof fs.open>) => {
+                    if (fault === 'open') throw failure;
+                    const handle = await realOpen(...args);
+                    if (fault === 'write') {
+                        const write = handle.writeFile.bind(handle);
+                        sub.mock.method(handle, 'writeFile', async () => { await write('{"directory":'); throw failure; });
+                    }
+                    if (fault === 'sync') sub.mock.method(handle, 'sync', async () => { throw failure; });
+                    if (fault === 'close') {
+                        const close = handle.close.bind(handle);
+                        sub.mock.method(handle, 'close', async () => { await close(); throw failure; });
+                    }
+                    return handle;
+                });
+                await assert.rejects(installManagedToolchain(ctx, 'latest', nativeTarget), error => error === failure);
+                assert.equal(await readFile(statePath(ctx), 'utf8'), before);
+                assert.equal(await loadManagedToolchain(ctx), installed.directory);
+                assert.equal(await readFile(path.join(installed.directory, 'runtime/resource.txt'), 'utf8'), 'runtime v1');
+                assert.ok(!(await readdir(path.dirname(statePath(ctx)))).some(name => name.startsWith('.staging-')));
+            });
+        }
+        const recovered = await installManagedToolchain(ctx, 'latest', nativeTarget);
+        assert.equal(recovered.release, 'v2');
+        assert.equal(await loadManagedToolchain(ctx), recovered.directory);
+        assert.equal(await readFile(path.join(installed.directory, 'runtime/resource.txt'), 'utf8'), 'runtime v1');
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('same-tag repair does not delete the previous generation when publishing fails', async t => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-install-same-tag-')));
+    try {
+        const valid = await archive(root, 'v1');
+        t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => String(input).startsWith('https://api.github.com/')
+            ? Response.json([valid.release]) : new Response(valid.bytes));
+        const ctx = context(root);
+        const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
+        const before = await readFile(statePath(ctx), 'utf8');
+        await writeFile(path.join(installed.directory, 'runtime/resource.txt'), 'corrupt');
+        const realRename = fs.rename.bind(fs);
+        const fault = t.mock.method(fs, 'rename', async (...[source, destination]: Parameters<typeof fs.rename>) => {
+            if (String(destination) === statePath(ctx)) throw Object.assign(new Error('injected publish failure'), { code: 'EACCES' });
+            return realRename(source, destination);
+        });
+        await assert.rejects(installManagedToolchain(ctx, 'latest', nativeTarget), /injected publish/);
+        assert.equal(await readFile(statePath(ctx), 'utf8'), before);
+        assert.equal(await readFile(path.join(installed.directory, executableName('teal')), 'utf8'), 'fixture executable');
+        fault.mock.restore();
+        const repaired = await installManagedToolchain(ctx, 'latest', nativeTarget);
+        assert.notEqual(repaired.directory, installed.directory);
+        assert.equal(await loadManagedToolchain(ctx), repaired.directory);
+        assert.equal(await readFile(path.join(repaired.directory, 'runtime/resource.txt'), 'utf8'), 'runtime v1');
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('a publication error after rename is reconciled without deleting the selected generation', async t => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-install-published-')));
+    try {
+        const valid = await archive(root, 'v1');
+        t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => String(input).startsWith('https://api.github.com/')
+            ? Response.json([valid.release]) : new Response(valid.bytes));
+        const ctx = context(root);
+        const rename = fs.rename.bind(fs);
+        t.mock.method(fs, 'rename', async (...[source, destination]: Parameters<typeof fs.rename>) => {
+            await rename(source, destination);
+            if (String(destination) === statePath(ctx)) throw Object.assign(new Error('injected lost acknowledgment'), { code: 'EIO' });
+        });
+        const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
+        assert.equal(await loadManagedToolchain(ctx), installed.directory);
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('rollback cleanup failure preserves the previous installation and a later retry succeeds', async t => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-install-cleanup-')));
+    try {
+        let selected = await archive(root, 'v1');
+        t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => String(input).startsWith('https://api.github.com/')
+            ? Response.json([selected.release]) : new Response(selected.bytes));
+        const ctx = context(root);
+        const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
+        const before = await readFile(statePath(ctx), 'utf8');
+        selected = await archive(root, 'v2');
+        const primary = Object.assign(new Error('injected state open'), { code: 'ENOSPC' });
+        const cleanup = Object.assign(new Error('injected rollback cleanup'), { code: 'EACCES' });
+        const originalRm = fs.rm.bind(fs);
+        const openFault = t.mock.method(fs, 'open', async () => { throw primary; });
+        const rmFault = t.mock.method(fs, 'rm', async (...args: Parameters<typeof fs.rm>) => {
+            if (String(args[0]).includes(`${path.sep}installations${path.sep}`)) throw cleanup;
+            return originalRm(...args);
+        });
+        await assert.rejects(installManagedToolchain(ctx, 'latest', nativeTarget), error => {
+            assert.ok(error instanceof AggregateError);
+            assert.deepEqual(error.errors, [primary, cleanup]);
+            return true;
+        });
+        assert.equal(await readFile(statePath(ctx), 'utf8'), before);
+        assert.equal(await loadManagedToolchain(ctx), installed.directory);
+        openFault.mock.restore();
+        rmFault.mock.restore();
+        const recovered = await installManagedToolchain(ctx, 'latest', nativeTarget);
+        assert.equal(await loadManagedToolchain(ctx), recovered.directory);
+        assert.equal(recovered.release, 'v2');
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('an unconfirmed publication keeps the selected data and remains recoverable', async t => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-install-uncertain-')));
+    try {
+        const valid = await archive(root, 'v1');
+        t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => String(input).startsWith('https://api.github.com/')
+            ? Response.json([valid.release]) : new Response(valid.bytes));
+        const ctx = context(root);
+        const rename = fs.rename.bind(fs);
+        const read = fs.readFile.bind(fs);
+        let publicationFailed = false;
+        t.mock.method(fs, 'rename', async (...args: Parameters<typeof fs.rename>) => {
+            await rename(...args);
+            if (String(args[1]) === statePath(ctx)) {
+                publicationFailed = true;
+                throw Object.assign(new Error('injected publication acknowledgment'), { code: 'EIO' });
+            }
+        });
+        const readFault = t.mock.method(fs, 'readFile', async (...args: Parameters<typeof fs.readFile>) => {
+            if (publicationFailed && String(args[0]) === statePath(ctx)) throw new Error('injected confirmation read');
+            return read(...args);
+        });
+        await assert.rejects(installManagedToolchain(ctx, 'latest', nativeTarget), /publication acknowledgment/);
+        readFault.mock.restore();
+        const selected = JSON.parse(await readFile(statePath(ctx), 'utf8'));
+        assert.equal(await loadManagedToolchain(ctx), selected.directory);
+        assert.equal(await readFile(path.join(selected.directory, 'runtime/resource.txt'), 'utf8'), 'runtime v1');
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('concurrent installations cannot roll back a different successful generation', async t => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-install-concurrent-')));
+    try {
+        let selected = await archive(root, 'v1');
+        let concurrent = false;
+        let metadataReads = 0;
+        let releaseBarrier!: () => void;
+        const metadataReady = new Promise<void>(resolve => { releaseBarrier = resolve; });
+        t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+            if (String(input).startsWith('https://api.github.com/')) {
+                if (concurrent) {
+                    if (++metadataReads === 2) releaseBarrier();
+                    await metadataReady;
+                }
+                return Response.json([selected.release]);
+            }
+            return new Response(selected.bytes);
+        });
+        const ctx = context(root);
+        const previous = await installManagedToolchain(ctx, 'latest', nativeTarget);
+        selected = await archive(root, 'v2');
+        concurrent = true;
+        const rename = fs.rename.bind(fs);
+        let failed = false;
+        t.mock.method(fs, 'rename', async (...args: Parameters<typeof fs.rename>) => {
+            if (String(args[1]) === statePath(ctx) && !failed) {
+                failed = true;
+                throw new Error('injected one concurrent failure');
+            }
+            return rename(...args);
+        });
+        const results = await Promise.allSettled([
+            installManagedToolchain(ctx, 'latest', nativeTarget),
+            installManagedToolchain(ctx, 'latest', nativeTarget),
+        ]);
+        const successes = results.filter(result => result.status === 'fulfilled');
+        assert.equal(successes.length, 1);
+        assert.equal(await loadManagedToolchain(ctx), successes[0].value.directory);
+        assert.equal(await readFile(path.join(previous.directory, 'runtime/resource.txt'), 'utf8'), 'runtime v1');
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('combined state write and close failures are preserved without changing the selection', async t => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-install-double-io-')));
+    try {
+        let selected = await archive(root, 'v1');
+        t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => String(input).startsWith('https://api.github.com/')
+            ? Response.json([selected.release]) : new Response(selected.bytes));
+        const ctx = context(root);
+        const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
+        selected = await archive(root, 'v2');
+        const originalOpen = fs.open.bind(fs);
+        const writeError = new Error('injected write failure');
+        const closeError = new Error('injected close failure');
+        t.mock.method(fs, 'open', async (...args: Parameters<typeof fs.open>) => {
+            const handle = await originalOpen(...args);
+            const close = handle.close.bind(handle);
+            t.mock.method(handle, 'writeFile', async () => { throw writeError; });
+            t.mock.method(handle, 'close', async () => { await close(); throw closeError; });
+            return handle;
+        });
+        await assert.rejects(installManagedToolchain(ctx, 'latest', nativeTarget), error => {
+            assert.ok(error instanceof AggregateError);
+            assert.deepEqual(error.errors, [writeError, closeError]);
+            return true;
+        });
+        assert.equal(await loadManagedToolchain(ctx), installed.directory);
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('temporary cleanup failure after publication cannot undo a successful installation', async t => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-install-committed-')));
+    try {
+        const valid = await archive(root, 'v1');
+        t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => String(input).startsWith('https://api.github.com/')
+            ? Response.json([valid.release]) : new Response(valid.bytes));
+        const ctx = context(root);
+        const originalRm = fs.rm.bind(fs);
+        t.mock.method(fs, 'rm', async (...args: Parameters<typeof fs.rm>) => {
+            if (path.basename(String(args[0])).startsWith('.staging-')) throw new Error('injected post-commit cleanup');
+            return originalRm(...args);
+        });
+        const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
+        assert.equal(await loadManagedToolchain(ctx), installed.directory);
+        assert.deepEqual(await installManagedToolchain(ctx, 'latest', nativeTarget), installed);
     } finally { await rm(root, { recursive: true, force: true }); }
 });
