@@ -2,7 +2,7 @@
   "name": "teal-vscode",
   "displayName": "Teal Language for VS Code",
   "description": "Teal 语言支持：本地语言服务器、运行和源码调试。",
-  "version": "0.1.6",
+  "version": "0.1.7",
   "publisher": "dev-chee",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -168,7 +168,7 @@
           "type": "string",
           "default": "",
           "scope": "machine-overridable",
-          "description": "工具链绝对目录：Windows 包含 teal.exe、teal-lsp.exe、teal-dap.exe；WSL 包含可执行的 teal、teal-lsp、teal-dap，路径使用 /mnt/d/...。留空从 PATH 选择同目录工具链；显式目录无效时不回退。"
+          "description": "工具链绝对目录：Windows 包含 teal.exe、teal-lsp.exe、teal-dap.exe、teal-fmt.exe；WSL 包含可执行的 teal、teal-lsp、teal-dap、teal-fmt，路径使用 /mnt/d/...。留空从 PATH 选择同目录工具链；显式目录无效时不回退。"
         },
         "teal.toolchain.release": {
           "type": "string",

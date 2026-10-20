@@ -11,7 +11,7 @@
 插件不会在激活时静默下载工具链。可以先在 Teal 源码仓库构建：
 
 ```powershell
-cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-dap
+cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-dap --bin teal-fmt
 ```
 
 在 VS Code 设置中搜索 `teal.toolchain.path`，填写构建输出的**绝对目录**，例如：
@@ -22,16 +22,16 @@ cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --b
 }
 ```
 
-请在 `D:\teal-lang` 中执行构建命令，且使用同次构建的三个工具。该目录应包含 `teal.exe`、`teal-lsp.exe`、`teal-dap.exe`。也可使用带完整 `runtime` 资源的 Teal 分发目录。使用集成终端调试时，工具链必须包含本项目配套的 DAP `console` 支持。
+请在 `D:\teal-lang` 中执行构建命令，且使用同次构建的四个工具。该目录应包含 `teal.exe`、`teal-lsp.exe`、`teal-dap.exe`、`teal-fmt.exe`。也可使用带完整 `runtime` 资源的 Teal 分发目录。使用集成终端调试时，工具链必须包含本项目配套的 DAP `console` 支持。
 
-配置为空时，按 PATH 顺序寻找第一个包含全部三项工具的目录；没有完整目录时使用第一个包含至少一项工具的目录。缺少工具仅停用对应功能，不跨目录拼接版本。显式目录无效时直接提示，不回退 PATH。PATH 中的空项或相对目录不参与查找；变更系统 PATH 后需要重启 VS Code。
+配置为空时，按 PATH 顺序寻找第一个包含全部四项工具的目录；没有完整目录时使用第一个包含至少一项工具的目录。缺少工具仅停用对应功能，不跨目录拼接版本。显式目录无效时直接提示，不回退 PATH。PATH 中的空项或相对目录不参与查找；变更系统 PATH 后需要重启 VS Code。
 
-如果没有找到显式目录或 PATH 工具链，在受信任工作区执行 **Teal: 安装 Teal 工具链**。命令从 `dev-chee/teal-vscode-extension` 的公开 GitHub Release 下载当前宿主对应的完整发行归档，并校验 GitHub 提供的 SHA-256 digest。归档内必须包含完整运行时和以下三个入口：
+如果没有找到显式目录或 PATH 工具链，在受信任工作区执行 **Teal: 安装 Teal 工具链**。命令从 `dev-chee/teal-vscode-extension` 的公开 GitHub Release 下载当前宿主对应的完整发行归档，并校验 GitHub 提供的 SHA-256 digest。归档内必须包含完整运行时和以下四个入口：
 
 - Windows x64：`teal-win32-x64.zip`
 - WSL Linux x64：`teal-linux-x64.tar.gz`
 
-托管工具链安装到扩展宿主的全局存储目录。`teal.toolchain.path` 始终优先；空配置时优先使用完整 PATH 工具链，再使用已安装的托管工具链。`teal.toolchain.release` 默认为 `latest`，也可以填写固定 Release 标签。下载源必须提供对应平台归档及 SHA-256 digest，归档必须包含完整发行目录和三个入口，否则安装会失败并保持现有工具链不变。
+托管工具链安装到扩展宿主的全局存储目录。`teal.toolchain.path` 始终优先；空配置时优先使用完整 PATH 工具链，再使用已安装的托管工具链。`teal.toolchain.release` 默认为 `latest`，也可以填写固定 Release 标签。下载源必须提供对应平台归档及 SHA-256 digest，归档必须包含完整发行目录和四个入口，否则安装会失败并保持现有工具链不变。
 
 插件仅在受信任工作区启动进程。未受信任时仍可使用语法高亮、括号和代码片段。WSL 中扩展运行在工作区的 Linux 扩展宿主，使用 Linux 工具链；暂不支持其他 Remote 类型、浏览器及虚拟文件系统。
 
@@ -41,7 +41,7 @@ cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --b
 
 ```bash
 cd /mnt/d/teal-lang
-cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-dap
+cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-dap --bin teal-fmt
 ```
 
 在 WSL 远程设置中配置：
@@ -52,7 +52,7 @@ cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --b
 }
 ```
 
-该目录必须包含具有执行权限的 Linux `teal`、`teal-lsp`、`teal-dap`。WSL 配置使用 Linux 路径，不能填写 `D:\teal-lang` 或使用 Windows `.exe` 工具链。运行和集成终端调试均在 WSL 内执行；托管安装也发生在 WSL 扩展宿主内。
+该目录必须包含具有执行权限的 Linux `teal`、`teal-lsp`、`teal-dap`、`teal-fmt`。WSL 配置使用 Linux 路径，不能填写 `D:\teal-lang` 或使用 Windows `.exe` 工具链。运行和集成终端调试均在 WSL 内执行；托管安装也发生在 WSL 扩展宿主内。
 
 ## 编辑
 

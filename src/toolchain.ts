@@ -3,7 +3,7 @@ import { constants } from 'node:fs';
 import { executableName } from './platform';
 import * as path from 'node:path';
 
-export const toolNames = ['teal', 'teal-lsp', 'teal-dap'] as const;
+export const toolNames = ['teal', 'teal-lsp', 'teal-dap', 'teal-fmt'] as const;
 export type ToolName = typeof toolNames[number];
 export interface Toolchain {
     directory: string;

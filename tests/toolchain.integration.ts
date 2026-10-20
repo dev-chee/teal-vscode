@@ -21,7 +21,7 @@ const document = (file: string) => ({ path: file, uri: pathToFileURL(file).toStr
 test('CLI receives generated run arguments, Unicode arguments and synchronous terminal input', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'teal-cli-integration-'));
     try {
-        assert.equal(Object.keys((await resolveToolchain(toolchain)).tools).length, 3);
+        assert.equal(Object.keys((await resolveToolchain(toolchain)).tools).length, 4);
         const program = path.join(root, '中文 with spaces.tl');
         await writeFile(program, 'task main() { let args = argv(); if args[0] != "a b" { exit(17); } if args[1] != "中文" { exit(19); } if input() != "stdin value" { exit(18); } }\n');
         await writeFile(path.join(root, 'permissions.toml'), '[permissions]\nrules = []\n');

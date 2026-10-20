@@ -44,7 +44,7 @@ jobs:
           $extract = Join-Path $env:RUNNER_TEMP 'teal-toolchain-windows'
           if (Test-Path -LiteralPath $extract) { Remove-Item -LiteralPath $extract -Recurse -Force }
           Expand-Archive -LiteralPath $archive -DestinationPath $extract
-          foreach ($tool in @('teal.exe', 'teal-lsp.exe', 'teal-dap.exe')) {
+          foreach ($tool in @('teal.exe', 'teal-lsp.exe', 'teal-dap.exe', 'teal-fmt.exe')) {
             $matches = @(Get-ChildItem -LiteralPath $extract -Recurse -File -Filter $tool)
             if ($matches.Count -ne 1) { throw "Expected exactly one $tool in the Windows toolchain archive." }
             if (-not $matches[0].Length) { throw "$tool is empty." }
@@ -104,6 +104,7 @@ jobs:
           test -x "$tool_root/teal"
           test -x "$tool_root/teal-lsp"
           test -x "$tool_root/teal-dap"
+          test -x "$tool_root/teal-fmt"
           "$tool_root/teal" --version
           '@
           $scriptPath = Join-Path $env:RUNNER_TEMP 'verify-wsl-toolchain.sh'
