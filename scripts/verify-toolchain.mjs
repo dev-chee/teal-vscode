@@ -1,9 +1,10 @@
 import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { appendFile, mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, readdir, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { promisify, parseArgs } from 'node:util';
 import { archiveName, distribution, readRelease, targets } from './toolchain-release.mjs';
+import { verifyToolchainDistribution } from '../src/toolchainDistributionCore.cjs';
 
 const exec = promisify(execFile);
 const { values } = parseArgs({ options: { target: { type: 'string' }, release: { type: 'string', default: 'latest' }, resolve: { type: 'boolean' } } });
@@ -37,21 +38,7 @@ if (values.resolve) {
     await exec('tar', ['-xf', archive, '-C', extracted], { maxBuffer: 4 * 1024 * 1024 });
     const directories = (await readdir(extracted, { withFileTypes: true })).filter((entry) => entry.isDirectory());
     if (directories.length !== 1) throw new Error('Expected exactly one distribution root.');
-    const directory = path.join(extracted, directories[0].name);
-    const suffix = target.startsWith('win32-') ? '.exe' : '';
-    for (const tool of ['teal', 'teal-lsp', 'teal-dap', 'teal-fmt']) {
-        const file = await stat(path.join(directory, tool + suffix));
-        if (!file.isFile() || !file.size || (!suffix && !(file.mode & 0o111))) throw new Error(`Invalid tool: ${tool}`);
-    }
-    const runtime = path.join(directory, 'runtime');
-    const manifest = JSON.parse(await readFile(path.join(runtime, 'manifest.json'), 'utf8'));
-    if (manifest.formatVersion !== 1 || !manifest.files?.length) throw new Error('Missing runtime manifest.');
-    for (const file of manifest.files) {
-        const resource = path.resolve(runtime, file.path);
-        if (!resource.startsWith(runtime + path.sep)) throw new Error(`Invalid runtime path: ${file.path}`);
-        const content = await readFile(resource);
-        if (content.length !== file.size || createHash('sha256').update(content).digest('hex') !== file.sha256) throw new Error(`Runtime digest mismatch: ${file.path}`);
-    }
+    const directory = await verifyToolchainDistribution(path.join(extracted, directories[0].name), target);
     await writeFile('target/toolchain-path.txt', directory);
     if (process.env.GITHUB_ENV) await appendFile(process.env.GITHUB_ENV, `TEAL_TOOLCHAIN_PATH=${directory}\n`);
     console.log(`Verified ${release.tag_name} / ${target}: ${directory}`);

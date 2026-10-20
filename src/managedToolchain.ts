@@ -9,6 +9,7 @@ import { parseManagedState, type ManagedState } from './managedState';
 import { currentToolchainTarget } from './hostPlatform';
 import { parseSha256Digest, readToolchainRelease, releaseAssetName, validateArchiveListing, validateAssetUrl, verifySha256, type ReleaseAsset } from './toolchainDownloadCore';
 import { inspectToolchain, isCompleteToolchain, toolNames } from './toolchain';
+import { verifyToolchainDistribution } from './toolchainDistributionCore.cjs';
 
 const managedDirectoryName = 'managed-toolchain';
 const maxAssetBytes = 512 * 1024 * 1024;
@@ -74,7 +75,9 @@ async function readManagedState(context: vscode.ExtensionContext): Promise<Manag
         const value = parseManagedState(JSON.parse(await readFile(path.join(managedRoot(context), 'current.json'), 'utf8')), currentToolchainTarget());
         if (!value) return undefined;
         const toolchain = await inspectToolchain(value.directory);
-        return isCompleteToolchain(toolchain) ? { directory: toolchain.directory, release: value.release, target: value.target } : undefined;
+        if (!isCompleteToolchain(toolchain)) return undefined;
+        await verifyToolchainDistribution(toolchain.directory, value.target);
+        return { directory: toolchain.directory, release: value.release, target: value.target };
     } catch {
         return undefined;
     }
@@ -112,6 +115,8 @@ export async function installManagedToolchain(
         await extractArchive(archivePath, extracted);
         const toolchainRoot = await findToolchainRoot(extracted);
         if (!toolchainRoot) throw new Error(`The downloaded release did not contain a complete Teal toolchain (${toolNames.join(', ')}).`);
+        // 完成与 CI 相同的分发校验后，才允许替换目录和发布 current.json。
+        await verifyToolchainDistribution(toolchainRoot, target);
         await mkdir(path.dirname(finalDirectory), { recursive: true });
         await rm(finalDirectory, { recursive: true, force: true });
         await rename(toolchainRoot, finalDirectory);
