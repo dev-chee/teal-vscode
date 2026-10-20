@@ -25,7 +25,7 @@ test('CLI receives generated run arguments, Unicode arguments and synchronous te
         const program = path.join(root, '中文 with spaces.tl');
         await writeFile(program, 'task main() { let args = argv(); if args[0] != "a b" { exit(17); } if args[1] != "中文" { exit(19); } if input() != "stdin value" { exit(18); } }\n');
         await writeFile(path.join(root, 'permissions.toml'), '[permissions]\nrules = []\n');
-        const result = spawnSync(tool('teal'), runArguments(program, ['--tier', 'hosted', '--permission-file', 'permissions.toml'], ['a b', '中文']), { cwd: root, input: 'stdin value\n', encoding: 'utf8', timeout: 20_000 });
+        const result = spawnSync(tool('teal'), runArguments(program, ['--tier', 'hosted', '--permission-file', 'permissions.toml'], ['a b', '中文']), { cwd: root, input: 'stdin value\n', encoding: 'utf8', timeout: Number(process.env.TEAL_TEST_TIMEOUT_MS ?? 20_000) });
         assert.ifError(result.error);
         assert.equal(result.status, 0, result.stderr);
     } finally { await rm(root, { recursive: true, force: true }); }

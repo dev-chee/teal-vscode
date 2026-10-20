@@ -21,7 +21,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.commands.registerCommand('teal.installToolchain', () => reporter.guard(async () => {
             requireExecution();
             const target = currentManagedToolchainTarget();
-            if (!target) throw new Error('Managed Teal toolchain installation is only available in supported desktop Windows or WSL Linux hosts.');
+            if (!target) throw new Error('No managed Teal toolchain matches this host architecture and ABI. Configure teal.toolchain.path manually.');
             const configured = vscode.workspace.getConfiguration('teal').get<string>('toolchain.path', '').trim();
             if (configured) {
                 const choice = await vscode.window.showWarningMessage('teal.toolchain.path is configured and takes priority. Install a managed toolchain anyway?', 'Install anyway');
@@ -50,7 +50,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
         vscode.debug.registerDebugAdapterDescriptorFactory('teal', new DebugAdapter(reporter)),
     );
     await vscode.commands.executeCommand('setContext', 'teal.supported', isSupported());
-    if (!isSupported()) output.appendLine('Teal tool execution requires a local Windows x64 or WSL Linux x64 workspace extension host.');
+    if (!isSupported()) output.appendLine('Teal tool execution requires a supported Windows, Linux or macOS Node.js workspace extension host.');
     await managed.refresh();
 }
 

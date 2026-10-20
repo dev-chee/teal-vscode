@@ -1,7 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { ManagedToolchainTarget } from './platform';
+import distribution from './toolchain-targets.json';
 
-const repository = 'dev-chee/teal-vscode-extension';
+const repository = distribution.repository;
 
 export interface ReleaseAsset {
     name: string;
@@ -18,7 +19,7 @@ export function releaseApiUrl(release: string): string {
 
 export function releaseAssetName(tool: string, target: ManagedToolchainTarget): string {
     void tool;
-    return `teal-${target}${target === 'win32-x64' ? '.zip' : '.tar.gz'}`;
+    return `teal-${target}${target.startsWith('win32-') ? '.zip' : '.tar.gz'}`;
 }
 
 export function parseSha256Digest(digest: string | undefined): string | undefined {

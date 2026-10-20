@@ -2,9 +2,17 @@ name: Publish VS Code extension
 
 on:
   push:
-    tags:
-      - 'v*'
+    tags: ['v*']
   workflow_dispatch:
+    inputs:
+      toolchain_release:
+        description: Complete stable toolchain Release in dev-chee/teal
+        type: string
+        default: latest
+      publish:
+        description: Publish to Marketplace (select a matching v* tag)
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -14,227 +22,153 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # Toolchain archives are verified before Marketplace publication. Both jobs
-  # resolve the newest release containing the required platform asset so a
-  # newer extension release cannot accidentally shadow the toolchain release.
-  verify-toolchain-windows:
-    runs-on: windows-latest
-
+  toolchain:
+    name: Select complete toolchain Release
+    runs-on: ubuntu-22.04
+    outputs:
+      tag: ${{ steps.release.outputs.tag }}
+      matrix: ${{ steps.release.outputs.matrix }}
     steps:
-      - name: Verify Windows toolchain asset
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $headers = @{
-            Accept = 'application/vnd.github+json'
-            'User-Agent' = 'teal-vscode-extension'
-          }
-          $releases = Invoke-RestMethod -Headers $headers -Uri 'https://api.github.com/repos/dev-chee/teal-vscode-extension/releases?per_page=50'
-          $release = $releases | Where-Object { $_.assets | Where-Object { $_.name -eq 'teal-win32-x64.zip' } } | Select-Object -First 1
-          if (-not $release) { throw 'No public toolchain release contains teal-win32-x64.zip.' }
-          $asset = $release.assets | Where-Object name -eq 'teal-win32-x64.zip' | Select-Object -First 1
-          if (-not $asset.digest -or $asset.digest -notmatch '^sha256:[0-9a-fA-F]{64}$') { throw "$($asset.name) has no valid SHA-256 digest." }
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+      - name: Resolve all 9 platform archives from one Release
+        id: release
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TOOLCHAIN_RELEASE: ${{ inputs.toolchain_release || 'latest' }}
+        run: node scripts/verify-toolchain.mjs --resolve --release "$TOOLCHAIN_RELEASE"
 
-          $archive = Join-Path $env:RUNNER_TEMP $asset.name
-          Invoke-WebRequest -Headers $headers -Uri $asset.browser_download_url -OutFile $archive
-          $expected = $asset.digest.Substring(7).ToLowerInvariant()
-          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
-          if ($actual -ne $expected) { throw "SHA-256 mismatch for $($asset.name): expected $expected, got $actual." }
-
-          $extract = Join-Path $env:RUNNER_TEMP 'teal-toolchain-windows'
-          if (Test-Path -LiteralPath $extract) { Remove-Item -LiteralPath $extract -Recurse -Force }
-          Expand-Archive -LiteralPath $archive -DestinationPath $extract
-          foreach ($tool in @('teal.exe', 'teal-lsp.exe', 'teal-dap.exe', 'teal-fmt.exe')) {
-            $matches = @(Get-ChildItem -LiteralPath $extract -Recurse -File -Filter $tool)
-            if ($matches.Count -ne 1) { throw "Expected exactly one $tool in the Windows toolchain archive." }
-            if (-not $matches[0].Length) { throw "$tool is empty." }
-          }
-          Write-Host "Verified $($release.tag_name): $($asset.name) ($actual)"
-
-  verify-toolchain-wsl:
-    runs-on: windows-latest
-
+  verify:
+    name: Verify ${{ matrix.target }}
+    needs: toolchain
+    timeout-minutes: 40
+    strategy:
+      fail-fast: false
+      matrix: ${{ fromJSON(needs.toolchain.outputs.matrix) }}
+    runs-on: ${{ matrix.runner }}
+    env:
+      DIST_TARGET: ${{ matrix.target }}
+      TOOLCHAIN_RELEASE: ${{ needs.toolchain.outputs.tag }}
     steps:
-      - name: Verify WSL Linux x64 toolchain asset
-        shell: pwsh
-        run: |
-          $ErrorActionPreference = 'Stop'
-          $headers = @{
-            Accept = 'application/vnd.github+json'
-            'User-Agent' = 'teal-vscode-extension'
-          }
-          $releases = Invoke-RestMethod -Headers $headers -Uri 'https://api.github.com/repos/dev-chee/teal-vscode-extension/releases?per_page=50'
-          $release = $releases | Where-Object { $_.assets | Where-Object { $_.name -eq 'teal-linux-x64.tar.gz' } } | Select-Object -First 1
-          if (-not $release) { throw 'No public toolchain release contains teal-linux-x64.tar.gz.' }
-          $asset = $release.assets | Where-Object name -eq 'teal-linux-x64.tar.gz' | Select-Object -First 1
-          if (-not $asset.digest -or $asset.digest -notmatch '^sha256:[0-9a-fA-F]{64}$') { throw "$($asset.name) has no valid SHA-256 digest." }
-
-          $distro = ((wsl.exe --list --quiet | Out-String) -replace "`0", '') -split '\r?\n' | ForEach-Object { $_.Trim() } | Where-Object { $_ } | Select-Object -First 1
-          if (-not $distro) {
-            $distro = 'TealUbuntu'
-            $rootfs = Join-Path $env:RUNNER_TEMP 'ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz'
-            $installRoot = Join-Path $env:RUNNER_TEMP 'teal-wsl-rootfs'
-            Invoke-WebRequest -Uri 'https://cloud-images.ubuntu.com/wsl/releases/24.04/current/ubuntu-noble-wsl-amd64-wsl.rootfs.tar.gz' -OutFile $rootfs
-            New-Item -ItemType Directory -Path $installRoot -Force | Out-Null
-            wsl.exe --import $distro $installRoot $rootfs --version 2
-          }
-          $arch = ((wsl.exe -d $distro -- uname -m | Out-String) -replace "`0", '').Trim()
-          if ($arch -ne 'x86_64') { throw "WSL distribution $distro is $arch, expected x86_64." }
-
-          $archive = Join-Path $env:RUNNER_TEMP $asset.name
-          Invoke-WebRequest -Headers $headers -Uri $asset.browser_download_url -OutFile $archive
-          $expected = $asset.digest.Substring(7).ToLowerInvariant()
-          $actual = (Get-FileHash -Algorithm SHA256 -LiteralPath $archive).Hash.ToLowerInvariant()
-          if ($actual -ne $expected) { throw "SHA-256 mismatch for $($asset.name): expected $expected, got $actual." }
-
-          $linuxArchive = "/mnt/$($archive.Substring(0, 1).ToLowerInvariant())$($archive.Substring(2).Replace('\', '/'))"
-          $script = @'
-          set -eu
-          archive="$1"
-          expected="$2"
-          root="$(mktemp -d)"
-          trap 'rm -rf "$root"' EXIT
-          actual="$(sha256sum "$archive" | awk '{print $1}')"
-          test "$actual" = "$expected"
-          mkdir "$root/extracted"
-          tar -xzf "$archive" -C "$root/extracted"
-          teal="$(find "$root/extracted" -type f -name teal -print -quit)"
-          test -n "$teal"
-          tool_root="$(dirname "$teal")"
-          test -x "$tool_root/teal"
-          test -x "$tool_root/teal-lsp"
-          test -x "$tool_root/teal-dap"
-          test -x "$tool_root/teal-fmt"
-          "$tool_root/teal" --version
-          '@
-          $scriptPath = Join-Path $env:RUNNER_TEMP 'verify-wsl-toolchain.sh'
-          [System.IO.File]::WriteAllText($scriptPath, $script.Replace("`r`n", "`n"))
-          $linuxScript = "/mnt/$($scriptPath.Substring(0, 1).ToLowerInvariant())$($scriptPath.Substring(2).Replace('\', '/'))"
-          wsl.exe -d $distro -- bash $linuxScript $linuxArchive $expected
-          Write-Host "Verified $($release.tag_name): $($asset.name) ($actual) in WSL $distro"
-
-  publish:
-    if: github.event_name == 'push'
-    needs:
-      - verify-toolchain-windows
-      - verify-toolchain-wsl
-    runs-on: ubuntu-latest
-
-    steps:
-      - name: Check out source
-        uses: actions/checkout@v4
-
-      - name: Set up pnpm
-        uses: pnpm/action-setup@v4
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
         with:
           version: 11
-
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: pnpm
-
-      - name: Check tag matches package version
-        if: github.event_name == 'push'
-        shell: bash
-        run: |
-          set -euo pipefail
-          tag_version="${GITHUB_REF_NAME#v}"
-          package_version="$(node -p "require('./package.json').version")"
-          if [[ "$tag_version" != "$package_version" ]]; then
-            echo "Tag v${tag_version} does not match package.json version ${package_version}."
-            exit 1
-          fi
-
       - name: Install dependencies
+        if: matrix.extensionHost
         run: pnpm install --frozen-lockfile
-
-      - name: Typecheck
-        run: pnpm run typecheck
-
-      - name: Lint
-        run: pnpm run lint
-
-      - name: Run unit tests
+      - name: Typecheck and lint
+        if: matrix.extensionHost
+        run: |
+          pnpm run typecheck
+          pnpm run lint
+      - name: Unit tests
+        if: matrix.extensionHost
         run: pnpm run test:unit
-
-      - name: Build extension
-        run: pnpm run build
-
-      - name: Package all desktop VSIX targets
-        shell: bash
-        run: |
-          set -euo pipefail
-          package_version="$(node -p "require('./package.json').version")"
-          mkdir -p target
-          targets=(
-            win32-x64
-            win32-arm64
-            linux-x64
-            linux-arm64
-            linux-armhf
-            alpine-x64
-            alpine-arm64
-            darwin-x64
-            darwin-arm64
-          )
-          for target in "${targets[@]}"; do
-            npx --yes @vscode/vsce@4.0.0 package \
-              --target "$target" \
-              --out "target/teal-vscode-${package_version}-${target}.vsix" \
-              --no-dependencies
-          done
-
-      - name: Verify all VSIX targets exist
-        shell: bash
-        run: |
-          set -euo pipefail
-          package_version="$(node -p "require('./package.json').version")"
-          targets=(
-            win32-x64
-            win32-arm64
-            linux-x64
-            linux-arm64
-            linux-armhf
-            alpine-x64
-            alpine-arm64
-            darwin-x64
-            darwin-arm64
-          )
-          for target in "${targets[@]}"; do
-            test -f "target/teal-vscode-${package_version}-${target}.vsix"
-          done
-
-      - name: Publish all desktop targets to Visual Studio Marketplace
-        shell: bash
-        run: |
-          set -euo pipefail
-          package_version="$(node -p "require('./package.json').version")"
-          targets=(
-            win32-x64
-            win32-arm64
-            linux-x64
-            linux-arm64
-            linux-armhf
-            alpine-x64
-            alpine-arm64
-            darwin-x64
-            darwin-arm64
-          )
-          packages=()
-          for target in "${targets[@]}"; do
-            packages+=("target/teal-vscode-${package_version}-${target}.vsix")
-          done
-          npx --yes @vscode/vsce@4.0.0 publish \
-            --packagePath "${packages[@]}"
+      - name: Download and verify platform toolchain
+        if: matrix.extensionHost
         env:
-          VSCE_PAT: ${{ secrets.VSCE_PAT }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: node scripts/verify-toolchain.mjs --target ${{ matrix.target }} --release "${{ needs.toolchain.outputs.tag }}"
+      - name: Real CLI, LSP and DAP protocol tests
+        if: matrix.extensionHost
+        run: pnpm run test:toolchain
+      - name: VS Code extension host tests (Windows and macOS)
+        if: matrix.extensionHost && runner.os != 'Linux'
+        env:
+          TEAL_TEST_GREP: cold-starts|recognizes generated|debug configurations|resolves tier|serves concrete LSP|integrated-terminal|runs a Teal file|attaches to
+        run: pnpm test
+      - name: VS Code extension host tests (Linux)
+        if: matrix.extensionHost && runner.os == 'Linux'
+        env:
+          TEAL_TEST_GREP: cold-starts|recognizes generated|debug configurations|resolves tier|serves concrete LSP|integrated-terminal|runs a Teal file|attaches to
+        run: xvfb-run --auto-servernum pnpm test
 
-      - name: Upload VSIX artifact
-        if: always()
-        uses: actions/upload-artifact@v4
+      - uses: docker/setup-qemu-action@v3
+        if: matrix.target == 'linux-armhf'
+        with:
+          platforms: arm
+      - name: Verify Alpine or ARMhf protocol execution
+        if: ${{ !matrix.extensionHost }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          image=node:22-alpine3.22
+          platform=linux/amd64
+          if [[ "$DIST_TARGET" == alpine-arm64 ]]; then platform=linux/arm64; fi
+          if [[ "$DIST_TARGET" == linux-armhf ]]; then
+            image=arm32v7/node:22-bookworm-slim
+            platform=linux/arm/v7
+          fi
+          docker run --rm --platform "$platform" -v "$PWD:/work" -v /work/node_modules -w /work \
+            -e DIST_TARGET -e TOOLCHAIN_RELEASE -e TEAL_TEST_TIMEOUT_MS=120000 "$image" sh -eu -c '
+              if command -v apk >/dev/null; then apk add --no-cache tar gzip libstdc++; else apt-get update && apt-get install -y --no-install-recommends ca-certificates tar gzip; fi
+              npm install --global pnpm@11
+              pnpm install --frozen-lockfile
+              pnpm run typecheck
+              pnpm run lint
+              pnpm run test:unit
+              node scripts/verify-toolchain.mjs --target "$DIST_TARGET" --release "$TOOLCHAIN_RELEASE"
+              export TEAL_TOOLCHAIN_PATH="$(cat target/toolchain-path.txt)"
+              pnpm run test:toolchain
+            '
+
+  package:
+    name: Package all desktop targets
+    needs: [toolchain, verify]
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run package:all
+      - uses: actions/upload-artifact@v4
         with:
           name: teal-vscode-${{ github.ref_name }}
           path: target/*.vsix
-          if-no-files-found: warn
+          if-no-files-found: error
+
+  publish:
+    name: Publish verified desktop packages
+    if: github.event_name == 'push' || inputs.publish
+    needs: package
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v6
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+      - name: Check tag matches package version
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="$(node -p "require('./package.json').version")"
+          if [[ "$GITHUB_REF_TYPE" != tag || "$GITHUB_REF_NAME" != "v$version" ]]; then
+            echo 'Publishing requires a v* tag matching package.json version.'
+            exit 1
+          fi
+      - run: pnpm install --frozen-lockfile
+      - uses: actions/download-artifact@v4
+        with:
+          name: teal-vscode-${{ github.ref_name }}
+          path: target
+      - name: Publish every target (safe to retry partial publications)
+        run: node scripts/publish.mjs
+        env:
+          VSCE_PAT: ${{ secrets.VSCE_PAT }}

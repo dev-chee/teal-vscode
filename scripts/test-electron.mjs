@@ -5,8 +5,8 @@ import { runTests } from '@vscode/test-electron';
 import { projectRoot, runNode } from './test-support.mjs';
 
 runNode('scripts/test.mjs');
-if (process.platform !== 'win32' || process.arch !== 'x64') {
-  throw new Error('Extension host tests require Windows x64; use test:unit or test:toolchain on WSL.');
+if (!['win32', 'linux', 'darwin'].includes(process.platform) || !['x64', 'arm64'].includes(process.arch)) {
+  throw new Error('Extension host tests require Windows, Linux or macOS x64/arm64.');
 }
 if (!process.env.TEAL_TOOLCHAIN_PATH) throw new Error('TEAL_TOOLCHAIN_PATH must point at rebuilt Teal executables.');
 runNode('scripts/build.mjs');

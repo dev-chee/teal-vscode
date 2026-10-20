@@ -1,19 +1,33 @@
 import * as path from 'node:path';
+import distribution from './toolchain-targets.json';
 
-/** 工具进程必须与工作区处于同一宿主，WSL 窗口中的 Windows UI 宿主不能代替 Linux。 */
-export function supportsExecution(platform: NodeJS.Platform, arch: string, remoteName: string | undefined, desktop: boolean): boolean {
-    return desktop && arch === 'x64' && (
-        (platform === 'win32' && !remoteName)
-        || (platform === 'linux' && remoteName === 'wsl')
-    );
+export type ManagedToolchainTarget = keyof typeof distribution.targets;
+export const toolchainTargets = Object.keys(distribution.targets) as ManagedToolchainTarget[];
+export type LinuxLibc = 'glibc' | 'musl' | 'unknown';
+
+export function isToolchainTarget(value: unknown): value is ManagedToolchainTarget {
+    return typeof value === 'string' && Object.hasOwn(distribution.targets, value);
 }
 
-export type ManagedToolchainTarget = 'win32-x64' | 'linux-x64';
+/** 此模块在工作区的 Node.js 宿主运行；远程界面类型不限制原生进程能力。 */
+export function supportsExecution(platform: NodeJS.Platform, arch: string): boolean {
+    return (platform === 'win32' || platform === 'darwin' || platform === 'linux')
+        && (arch === 'x64' || arch === 'arm64' || (platform === 'linux' && arch === 'arm'));
+}
 
-/** The currently supported managed toolchain targets. WSL uses the Linux target. */
-export function managedToolchainTarget(platform: NodeJS.Platform, arch: string, remoteName: string | undefined, desktop: boolean): ManagedToolchainTarget | undefined {
-    if (!supportsExecution(platform, arch, remoteName, desktop)) return undefined;
-    return platform === 'win32' ? 'win32-x64' : 'linux-x64';
+/** 手工工具链可独立使用；自动安装必须明确 libc 和 ARM hard-float ABI。 */
+export function managedToolchainTarget(
+    platform: NodeJS.Platform, arch: string,
+    details: { libc?: LinuxLibc; armVersion?: string; armFloatAbi?: string } = {},
+): ManagedToolchainTarget | undefined {
+    if (!supportsExecution(platform, arch)) return undefined;
+    if (platform !== 'linux') return `${platform}-${arch}` as ManagedToolchainTarget;
+    if (details.libc !== 'glibc' && details.libc !== 'musl') return undefined;
+    if (arch === 'arm') {
+        return details.libc === 'glibc' && Number(details.armVersion) >= 7 && details.armFloatAbi === 'hard'
+            ? 'linux-armhf' : undefined;
+    }
+    return `${details.libc === 'musl' ? 'alpine' : 'linux'}-${arch}` as ManagedToolchainTarget;
 }
 
 export function executableName(name: string, platform: NodeJS.Platform = process.platform): string {

@@ -4,7 +4,9 @@ import { mkdir, readFile, readdir, rename, rm, writeFile } from 'node:fs/promise
 import { promisify } from 'node:util';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
-import { managedToolchainTarget, type ManagedToolchainTarget } from './platform';
+import type { ManagedToolchainTarget } from './platform';
+import { parseManagedState, type ManagedState } from './managedState';
+import { currentToolchainTarget } from './hostPlatform';
 import { parseSha256Digest, releaseApiUrl, releaseAssetName, validateArchiveListing, validateAssetUrl, verifySha256, type ReleaseAsset } from './toolchainDownloadCore';
 import { inspectToolchain, isCompleteToolchain, toolNames } from './toolchain';
 
@@ -15,12 +17,8 @@ const execFileAsync = promisify(execFile);
 interface ReleaseInfo {
     tag_name: string;
     assets: ReleaseAsset[];
-}
-
-interface ManagedState {
-    directory: string;
-    release: string;
-    target: ManagedToolchainTarget;
+    draft?: boolean;
+    prerelease?: boolean;
 }
 
 export { parseSha256Digest, releaseApiUrl, releaseAssetName, validateAssetUrl, verifySha256 } from './toolchainDownloadCore';
@@ -38,7 +36,7 @@ async function fetchRelease(release: string, target: ManagedToolchainTarget): Pr
     if (release.trim() === '' || release.trim().toLowerCase() === 'latest') {
         if (!Array.isArray(value)) throw new Error('The Teal toolchain release list response is invalid.');
         const archiveName = releaseAssetName('teal', target);
-        const found = value.find((item) => typeof item.tag_name === 'string' && Array.isArray(item.assets) && item.assets.some((asset) => asset.name === archiveName));
+        const found = value.find((item) => !item.draft && !item.prerelease && typeof item.tag_name === 'string' && Array.isArray(item.assets) && item.assets.some((asset) => asset.name === archiveName));
         if (!found || typeof found.tag_name !== 'string' || !Array.isArray(found.assets)) throw new Error(`No Teal toolchain release contains ${archiveName}.`);
         return { tag_name: found.tag_name, assets: found.assets as ReleaseAsset[] };
     }
@@ -86,8 +84,8 @@ async function findToolchainRoot(root: string): Promise<string | undefined> {
 
 async function readManagedState(context: vscode.ExtensionContext): Promise<ManagedState | undefined> {
     try {
-        const value = JSON.parse(await readFile(path.join(managedRoot(context), 'current.json'), 'utf8')) as Partial<ManagedState>;
-        if (typeof value.directory !== 'string' || typeof value.release !== 'string' || (value.target !== 'win32-x64' && value.target !== 'linux-x64')) return undefined;
+        const value = parseManagedState(JSON.parse(await readFile(path.join(managedRoot(context), 'current.json'), 'utf8')), currentToolchainTarget());
+        if (!value) return undefined;
         const toolchain = await inspectToolchain(value.directory);
         return isCompleteToolchain(toolchain) ? { directory: toolchain.directory, release: value.release, target: value.target } : undefined;
     } catch {
@@ -139,5 +137,5 @@ export async function installManagedToolchain(
 }
 
 export function currentManagedToolchainTarget(): ManagedToolchainTarget | undefined {
-    return managedToolchainTarget(process.platform, process.arch, vscode.env.remoteName, vscode.env.uiKind === vscode.UIKind.Desktop);
+    return currentToolchainTarget();
 }

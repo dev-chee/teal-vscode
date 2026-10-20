@@ -1,5 +1,10 @@
 # Change Log
 
+## [Unreleased]
+
+- 支持 9 个桌面平台的原生工具链识别、托管安装与工作区运行/调试入口，覆盖本地及远程 Node.js 宿主。
+- 工具链与扩展发布增加各平台真实 CLI/LSP/DAP 验收，工具链下载源统一为 `dev-chee/teal`。
+
 ## [0.1.7] - 2026-10-20
 
 - 托管和本地工具链新增 `teal-fmt`，Windows 与 WSL 发行归档均包含四个 Teal 工具。

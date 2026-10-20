@@ -27,6 +27,10 @@ git push origin v0.1.1
 
 标签必须严格匹配 `package.json` 的版本，例如 `v0.1.1` 对应 `0.1.1`。工作流会依次执行类型检查、Lint、单元测试、打包，然后把全部桌面目标 VSIX 发布到 Marketplace，并把 VSIX 保存为 GitHub Actions artifact。
 
-Marketplace 发布以下全部桌面目标：`win32-x64`、`win32-arm64`、`linux-x64`、`linux-arm64`、`linux-armhf`、`alpine-x64`、`alpine-arm64`、`darwin-x64`、`darwin-arm64`。当前不发布 `web`，因为扩展需要桌面 Node.js、子进程和 DAP。
+Marketplace 发布以下全部桌面目标：`win32-x64`、`win32-arm64`、`linux-x64`、`linux-arm64`、`linux-armhf`、`alpine-x64`、`alpine-arm64`、`darwin-x64`、`darwin-arm64`。当前不发布 `web`，因为原生执行依赖 Node.js 工作区宿主、子进程和 DAP。
 
-扩展不包含 Teal 工具链，用户仍需按 README 中的说明安装工具链。当前扩展的运行/调试能力仍由代码中的宿主检查决定；未提供对应 Teal 工具链的目标只能使用能正常启动的语言功能。
+扩展不包含 Teal 工具链，用户按 README 配置本地工具链或执行托管安装。工具链统一发布在 `dev-chee/teal`，需要先提交并运行 Teal 源码仓库的 `Release Teal toolchain` 工作流。填写唯一 `release_tag` 和 `source_ref`，工作流将源码解析为固定 SHA，全部 9 个目标构建和协议验收成功后才创建 Release。
+
+扩展发布会选择同一个包含全部 9 个归档的正式工具链 Release，校验 SHA-256 和 runtime 资源，再运行各平台协议测试与六个平台的 VS Code 宿主测试。缺少任意目标会阻止发布；不会混合历史版本填补缺失目标。
+
+Actions 手动运行默认仅验收和打包，可用 `toolchain_release` 指定正式工具链标签。勾选 `publish` 时必须选择匹配 `package.json` 的扩展版本标签，发布使用 `VSCE_PAT`。部分目标已发布后的重试会跳过相同版本的目标，继续发布剩余目标。

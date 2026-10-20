@@ -168,7 +168,7 @@
           "type": "string",
           "default": "",
           "scope": "machine-overridable",
-          "description": "工具链绝对目录：Windows 包含 teal.exe、teal-lsp.exe、teal-dap.exe、teal-fmt.exe；WSL 包含可执行的 teal、teal-lsp、teal-dap、teal-fmt，路径使用 /mnt/d/...。留空从 PATH 选择同目录工具链；显式目录无效时不回退。"
+          "description": "工具链绝对目录：Windows 包含 teal.exe、teal-lsp.exe、teal-dap.exe、teal-fmt.exe；Linux/macOS 包含可执行的 teal、teal-lsp、teal-dap、teal-fmt。远程工作区填写扩展宿主上的路径。留空从 PATH 选择同目录工具链；显式目录无效时不回退。"
         },
         "teal.toolchain.release": {
           "type": "string",
@@ -385,7 +385,9 @@
     "package": "node scripts/package.mjs",
     "test:unit": "node scripts/test.mjs",
     "test:toolchain": "node scripts/test.mjs --toolchain",
-    "package:windows": "node scripts/package.mjs --target win32-x64"
+    "package:windows": "node scripts/package.mjs --target win32-x64",
+    "package:all": "node scripts/package.mjs --all-targets",
+    "verify:toolchain": "node scripts/verify-toolchain.mjs"
   },
   "dependencies": {
     "vscode-languageclient": "9.0.1"

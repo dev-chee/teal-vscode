@@ -3,7 +3,7 @@ import { resolveToolchainWithManaged, type ToolName } from './toolchain';
 import { executableName, supportsExecution } from './platform';
 
 export function isSupported(): boolean {
-    return supportsExecution(process.platform, process.arch, vscode.env.remoteName, vscode.env.uiKind === vscode.UIKind.Desktop);
+    return supportsExecution(process.platform, process.arch);
 }
 
 let managedToolchainDirectory: string | undefined;
@@ -13,7 +13,7 @@ export function setManagedToolchainDirectory(directory: string | undefined): voi
 }
 
 export function requireExecution(): void {
-    if (!isSupported()) throw new Error('Teal requires a local Windows x64 or WSL Linux x64 workspace extension host in desktop VS Code.');
+    if (!isSupported()) throw new Error('Teal requires a supported Windows, Linux or macOS Node.js workspace extension host.');
     if (!vscode.workspace.isTrusted) throw new Error('Trust this workspace before starting the Teal toolchain.');
 }
 

@@ -69,7 +69,7 @@ export class ProtocolPeer {
             const timer = setTimeout(() => {
                 this.waiters.splice(this.waiters.indexOf(waiter), 1);
                 reject(new Error('Protocol response timed out'));
-            }, 15_000);
+            }, Number(process.env.TEAL_TEST_TIMEOUT_MS ?? 15_000));
             const waiter = { matches, resolve: (message: ProtocolMessage) => { clearTimeout(timer); resolve(message); }, reject: (error: Error) => { clearTimeout(timer); reject(error); } };
             this.waiters.push(waiter);
         });

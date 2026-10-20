@@ -1,12 +1,12 @@
 # Teal for Visual Studio Code
 
-为 Teal 提供本地语言服务、终端运行和源码调试。支持 **Windows x64 本地桌面和 WSL Linux x64 工作区，VS Code 1.91 或更新版本**。
+为 Teal 提供本地语言服务、终端运行和源码调试。面向 **Windows、Linux、macOS 的 9 个桌面目标，VS Code 1.91 或更新版本**。本地、WSL、Remote SSH、Dev Containers 与 Codespaces 的 Node.js 工作区宿主使用该宿主对应的原生工具链。
 
 ## 安装与工具链
 
 通过 VS Code 的“扩展：从 VSIX 安装”选择构建生成的 VSIX，然后打开 `.tl` 文件。
 
-`pnpm run package:windows` 生成 Windows x64 专用包，用于 Windows 本地 VS Code。WSL 请使用 `pnpm run package` 生成的通用包。
+`pnpm run package:all` 生成全部 9 个平台的 VSIX；`pnpm run package --target darwin-arm64` 生成单个平台包。`pnpm run package` 仍生成通用包，`pnpm run package:windows` 生成 Windows x64 包。
 
 插件不会在激活时静默下载工具链。可以先在 Teal 源码仓库构建：
 
@@ -26,21 +26,27 @@ cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --b
 
 配置为空时，按 PATH 顺序寻找第一个包含全部四项工具的目录；没有完整目录时使用第一个包含至少一项工具的目录。缺少工具仅停用对应功能，不跨目录拼接版本。显式目录无效时直接提示，不回退 PATH。PATH 中的空项或相对目录不参与查找；变更系统 PATH 后需要重启 VS Code。
 
-如果没有找到显式目录或 PATH 工具链，在受信任工作区执行 **Teal: 安装 Teal 工具链**。命令从 `dev-chee/teal-vscode-extension` 的公开 GitHub Release 下载当前宿主对应的完整发行归档，并校验 GitHub 提供的 SHA-256 digest。归档内必须包含完整运行时和以下四个入口：
+如果没有找到显式目录或 PATH 工具链，在受信任工作区执行 **Teal: 安装 Teal 工具链**。命令从 `dev-chee/teal` 的公开 GitHub Release 下载当前宿主对应的完整发行归档，并校验 GitHub 提供的 SHA-256 digest。归档内必须包含完整运行时和以下四个入口：
 
-- Windows x64：`teal-win32-x64.zip`
-- WSL Linux x64：`teal-linux-x64.tar.gz`
+| 平台 | 发行归档 |
+| --- | --- |
+| Windows x64 / ARM64 | `teal-win32-x64.zip` / `teal-win32-arm64.zip` |
+| Linux glibc x64 / ARM64 / ARMv7 hard-float | `teal-linux-x64.tar.gz` / `teal-linux-arm64.tar.gz` / `teal-linux-armhf.tar.gz` |
+| Alpine musl x64 / ARM64 | `teal-alpine-x64.tar.gz` / `teal-alpine-arm64.tar.gz` |
+| macOS Intel / Apple Silicon | `teal-darwin-x64.tar.gz` / `teal-darwin-arm64.tar.gz` |
+
+平台按扩展宿主的操作系统、架构和 libc/ARM ABI 选择；无法确认 ABI 时仍可配置本地工具链，但不会猜测托管归档。下载源尚未发布对应平台时，安装会明确失败，不下载其他架构代替。
 
 托管工具链安装到扩展宿主的全局存储目录。`teal.toolchain.path` 始终优先；空配置时优先使用完整 PATH 工具链，再使用已安装的托管工具链。`teal.toolchain.release` 默认为 `latest`，也可以填写固定 Release 标签。下载源必须提供对应平台归档及 SHA-256 digest，归档必须包含完整发行目录和四个入口，否则安装会失败并保持现有工具链不变。
 
-插件仅在受信任工作区启动进程。未受信任时仍可使用语法高亮、括号和代码片段。WSL 中扩展运行在工作区的 Linux 扩展宿主，使用 Linux 工具链；暂不支持其他 Remote 类型、浏览器及虚拟文件系统。
+插件仅在受信任工作区启动进程。未受信任时仍可使用语法高亮、括号和代码片段。远程工作区中扩展运行在工作区宿主，工具链、源码路径和终端均位于该宿主。浏览器连接 Codespaces 时使用远程 Node.js 宿主；纯浏览器宿主和虚拟文件系统暂不支持原生进程。
 
 ## WSL 安装
 
 在连接到 WSL 的 VS Code 窗口中，把扩展安装到对应的 WSL 发行版。工具链也需要在 WSL 内构建：
 
 ```bash
-cd /mnt/d/teal-lang
+cd /mnt/d/teal
 cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-dap --bin teal-fmt
 ```
 
@@ -171,7 +177,7 @@ pnpm test
 pnpm run package
 ```
 
-`pnpm run test:unit` 在 Windows/Linux 均可运行，覆盖配置校验、文档保存、工具链解析和 LSP 会话调度，不启动 VS Code，也不要求 Teal 二进制。`pnpm test` 需要 Windows x64 桌面环境。测试前将两个环境变量改成实际路径，并先从本次 Teal 源码构建工具链；测试使用隔离的 VS Code 配置目录。在源码目录按 F5 启动扩展开发宿主，在新窗口中配置本地工具链路径。`pnpm run watch` 用于持续构建。打包只包含捆绑后的扩展代码、语言资源和文档，工具链二进制不进入 VSIX；依赖许可保存在 `THIRD_PARTY_NOTICES.md`。
+`pnpm run test:unit` 在 Windows/Linux/macOS 均可运行，覆盖配置校验、文档保存、工具链解析和 LSP 会话调度，不启动 VS Code，也不要求 Teal 二进制。`pnpm test` 支持 Windows/Linux/macOS x64 与 ARM64；Linux 无图形环境时使用 `xvfb-run --auto-servernum pnpm test`。测试前将两个环境变量改成实际路径，并先从本次 Teal 源码构建工具链；测试使用隔离的 VS Code 配置目录。在源码目录按 F5 启动扩展开发宿主，在新窗口中配置本地工具链路径。`pnpm run watch` 用于持续构建。打包只包含捆绑后的扩展代码、语言资源和文档，工具链二进制不进入 VSIX；依赖许可保存在 `THIRD_PARTY_NOTICES.md`。
 
 在 WSL 中验证真实工具链：
 
@@ -179,7 +185,7 @@ pnpm run package
 TEAL_TOOLCHAIN_PATH=/mnt/d/teal-lang/target/release pnpm run test:toolchain
 ```
 
-`test:toolchain` 在 Windows/Linux 均可运行，覆盖 CLI 参数与输入、嵌套工作区 LSP 刷新、DAP 启动/暂停/继续；它不替代 VS Code 扩展宿主端到端测试。测试入口会重新编译并清理旧测试产物，避免已删除的测试继续运行。
+`test:toolchain` 在全部目标的原生或模拟执行环境均可运行，覆盖 CLI 参数与输入、嵌套工作区 LSP 刷新、DAP 启动/暂停/继续；它不替代 VS Code 扩展宿主端到端测试。测试入口会重新编译并清理旧测试产物，避免已删除的测试继续运行。
 
 ## 代码结构
 
@@ -190,3 +196,9 @@ TEAL_TOOLCHAIN_PATH=/mnt/d/teal-lang/target/release pnpm run test:toolchain
 - 核心单测直接调用这些模块；`toolchain.integration.ts` 通过标准协议连接真实工具，编辑器交互测试保留在 `extensionHost.test.ts`。
 
 测试环境与实际验收结果见测试入口及 `target/test-gate/local-vscode/` 下生成的报告；报告目录和 VSIX 是本地产物，不纳入 Git。发布流程见 [`PUBLISHING.md`](PUBLISHING.md)，向 GitHub 推送匹配 `package.json` 版本的 `v*` 标签即可触发 Marketplace 发布。
+
+## 全平台 CI
+
+Teal 源码仓库的 `release-toolchain.yml` 固定同一源码 SHA，构建并验证全部 9 个目标。扩展仓库的 `publish-marketplace.yml` 只选择包含全部目标归档的同一个正式 Release，校验归档及 runtime 文件摘要，并执行平台单元测试和真实 CLI/LSP/DAP 协议测试。
+
+GNU/Linux 归档基于 Ubuntu 22.04（glibc 2.35），Alpine 归档基于 Alpine 3.22。Windows、Linux、macOS 的 x64/ARM64 还运行 VS Code 宿主测试，覆盖集成终端调试、单步、变量、运行输入和 attach。CI 不启动外部终端与完整多根工作区交互测试；本地 `pnpm test` 可运行完整集合。Alpine 在对应架构容器中验证协议，ARMhf 在 QEMU 容器中验证，后者不等同于真实 ARMhf 机器验收。平台发布支持不代表这些尚未执行的 CI 检查已通过。
