@@ -1,26 +1,36 @@
 import { createHash } from 'node:crypto';
+import * as path from 'node:path';
 import * as vscode from 'vscode';
 import { isLocalTealDocument } from './documents';
 import { isSupported } from './environment';
 import { currentManagedToolchainTarget, installManagedToolchain, loadManagedToolchain, updateManagedToolchain, type ManagedToolchainStorage } from './managedToolchain';
 import { isCompleteToolchain, resolveToolchain } from './toolchain';
-import { ToolchainUpdates } from './toolchainUpdates';
+import { ToolchainUpdates, type UpdateSettings } from './toolchainUpdates';
 
 export function toolchainRelease(resource?: vscode.Uri): string {
     const value = vscode.workspace.getConfiguration('teal', resource).get<string>('toolchain.release', 'latest').trim();
     return !value || value.toLowerCase() === 'latest' ? 'latest' : value;
 }
 
-/** 每个文件夹独立调度；相同版本共享安装，不同固定标签不会互相替换选择。 */
+interface Entry {
+    resource: vscode.Uri | undefined;
+    updates: ToolchainUpdates;
+    bootstrap?: Promise<void>;
+}
+
+/** 文件夹独立调度，版本独立缓存；进程激活失败时恢复本窗口的旧选择。 */
 export class WorkspaceToolchains {
-    private readonly entries = new Map<string, { resource: vscode.Uri | undefined; updates: ToolchainUpdates }>();
+    private readonly entries = new Map<string, Entry>();
     private readonly directories = new Map<string, Promise<string | undefined>>();
+    private readonly applied = new Map<string, string>();
+    private readonly blocked = new Set<string>();
+    private queue: Promise<void> = Promise.resolve();
     private started = false;
     private stopped = false;
 
     constructor(
         private readonly context: ManagedToolchainStorage,
-        private readonly refresh: (force: boolean) => Promise<void>,
+        private readonly refresh: (force: boolean, keys: readonly string[]) => Promise<void>,
         private readonly log: (message: string) => void,
     ) {}
 
@@ -30,22 +40,92 @@ export class WorkspaceToolchains {
         return { globalStorageUri: vscode.Uri.joinPath(this.context.globalStorageUri, 'toolchain-releases', key) };
     }
 
+    private async cached(release: string, excluded: readonly string[] = []): Promise<string | undefined> {
+        return await loadManagedToolchain(this.storage(release), release, excluded)
+            ?? (release === 'latest' ? undefined : await loadManagedToolchain(this.context, release, excluded));
+    }
+
     private load(release: string): Promise<string | undefined> {
         let directory = this.directories.get(release);
         if (!directory) {
-            directory = loadManagedToolchain(this.storage(release), release).then(value =>
-                value ?? (release === 'latest' ? undefined : loadManagedToolchain(this.context, release)));
+            directory = this.cached(release);
             this.directories.set(release, directory);
         }
         return directory;
     }
 
-    private async select(directory: string, release: string): Promise<void> {
-        const previous = await this.load(release);
-        if (previous === directory) return;
-        this.directories.set(release, Promise.resolve(directory));
-        this.log(`[Toolchain] Selected ${release}: ${directory}`);
-        await this.refresh(previous !== undefined);
+    private async settings(resource?: vscode.Uri): Promise<UpdateSettings> {
+        const config = vscode.workspace.getConfiguration('teal', resource);
+        const configured = config.get<string>('toolchain.path', '').trim();
+        const fromPath = configured ? undefined : await resolveToolchain('').catch(() => undefined);
+        const release = toolchainRelease(resource);
+        if (!configured && !isCompleteToolchain(fromPath)) await this.load(release);
+        return { trusted: vscode.workspace.isTrusted, supported: isSupported() && !!currentManagedToolchainTarget(),
+            autoUpdate: config.get<boolean>('toolchain.autoUpdate', true), release,
+            local: !!configured || isCompleteToolchain(fromPath) };
+    }
+
+    /** 与 LanguageClients 的分组键一致；本地路径及其他固定版本不参与此次切换。 */
+    private async affectedKeys(release: string): Promise<string[]> {
+        const keys = new Set<string>();
+        for (const document of vscode.workspace.textDocuments) {
+            if (!isLocalTealDocument(document)) continue;
+            const folder = vscode.workspace.getWorkspaceFolder(document.uri);
+            const settings = await this.settings(folder?.uri);
+            if (settings.release === release && !settings.local) {
+                keys.add((folder?.uri ?? vscode.Uri.file(path.dirname(document.uri.fsPath))).toString());
+            }
+        }
+        return [...keys].sort();
+    }
+
+    private select(directory: string, release: string, onlyCurrent = false): Promise<void> {
+        const operation = this.queue.then(async () => {
+            if (this.stopped) return;
+            const keys = await this.affectedKeys(release);
+            const signature = JSON.stringify(keys);
+            const previous = await this.load(release);
+            // 文档事件可能排在更新之后，不能用事件开始时读取的旧目录覆盖新选择。
+            if (onlyCurrent && previous && previous !== directory) return;
+            if (previous === directory && this.applied.get(release) === signature) return;
+            this.blocked.delete(release);
+            this.directories.set(release, Promise.resolve(directory));
+            try {
+                // 新加入此版本的根可能仍运行其他工具链，必须确认所有目标根已切换。
+                await this.refresh(true, keys);
+                if (this.stopped || signature !== JSON.stringify(await this.affectedKeys(release))) return;
+                this.applied.set(release, signature);
+                this.log(`[Toolchain] Selected ${release}: ${directory}`);
+            } catch (error) {
+                this.applied.delete(release);
+                if (this.stopped || signature !== JSON.stringify(await this.affectedKeys(release))) throw error;
+                const fallback = previous && previous !== directory ? previous : await this.cached(release, [directory]);
+                this.directories.set(release, Promise.resolve(fallback));
+                if (!fallback) this.blocked.add(release);
+                if (fallback) {
+                    try {
+                        await this.refresh(true, keys);
+                        this.applied.set(release, signature);
+                        this.log(`[Toolchain] Restored ${release}: ${fallback}`);
+                    } catch (restore) {
+                        throw new AggregateError([error, restore], `Toolchain activation failed: ${String(error)}; restoring the previous language server also failed.`, { cause: restore });
+                    }
+                }
+                // 下载成功不等于进程可用；保持旧选择，使下一次检查能重试候选目录。
+                throw error;
+            }
+        });
+        this.queue = operation.catch(() => {});
+        return operation;
+    }
+
+    private async bootstrap(resource?: vscode.Uri): Promise<void> {
+        try {
+            const settings = await this.settings(resource);
+            if (this.stopped || !settings.trusted || !settings.supported || settings.local) return;
+            const directory = await this.load(settings.release);
+            if (directory && settings.release === toolchainRelease(resource)) await this.select(directory, settings.release, true);
+        } catch (error) { this.log(`[Toolchain activation] ${String(error)}`); }
     }
 
     private entry(resource?: vscode.Uri): ToolchainUpdates {
@@ -53,16 +133,7 @@ export class WorkspaceToolchains {
         let entry = this.entries.get(key);
         if (!entry) {
             const updates = new ToolchainUpdates({
-                settings: async () => {
-                    const config = vscode.workspace.getConfiguration('teal', resource);
-                    const configured = config.get<string>('toolchain.path', '').trim();
-                    const fromPath = configured ? undefined : await resolveToolchain('').catch(() => undefined);
-                    const release = toolchainRelease(resource);
-                    if (!configured && !isCompleteToolchain(fromPath)) await this.load(release);
-                    return { trusted: vscode.workspace.isTrusted, supported: isSupported() && !!currentManagedToolchainTarget(),
-                        autoUpdate: config.get<boolean>('toolchain.autoUpdate', true), release,
-                        local: !!configured || isCompleteToolchain(fromPath) };
-                },
+                settings: () => this.settings(resource),
                 install: async (release, options) => {
                     const target = currentManagedToolchainTarget();
                     return target ? (await updateManagedToolchain(this.storage(release), release, target, options))?.directory : undefined;
@@ -72,7 +143,10 @@ export class WorkspaceToolchains {
             });
             entry = { resource, updates };
             this.entries.set(key, entry);
-            if (this.started && !this.stopped) updates.start();
+        }
+        if (this.started && !this.stopped && !entry.bootstrap) {
+            entry.bootstrap = this.bootstrap(resource);
+            entry.updates.start();
         }
         return entry.updates;
     }
@@ -83,27 +157,36 @@ export class WorkspaceToolchains {
         return resources;
     }
 
-    start(): void {
+    async start(): Promise<void> {
         this.started = true;
         for (const resource of this.resources()) this.entry(resource);
+        await Promise.all([...this.entries.values()].map(entry => entry.bootstrap));
     }
 
     async directory(resource?: vscode.Uri): Promise<string | undefined> {
+        if (this.stopped) return undefined;
         const scope = resource ? vscode.workspace.getWorkspaceFolder(resource)?.uri : undefined;
         const updates = this.entry(scope);
         for (;;) {
             const release = toolchainRelease(scope);
             let directory = await this.load(release);
-            if (!directory) {
-                await updates.ready();
-                directory = await this.load(release);
+            if (!directory && !this.blocked.has(release)) {
+                // 空缓存不能永久记忆：另一个窗口可能刚安装了同一个固定版本。
+                directory = await this.cached(release);
+                if (directory) {
+                    const selected = directory;
+                    void this.select(selected, release, true).catch(error => this.log(`[Toolchain activation] ${String(error)}`));
+                } else directory = await updates.preparedDirectory(release);
             }
             if (release === toolchainRelease(scope)) return directory;
         }
     }
 
     async check(): Promise<void> {
-        await Promise.all(this.resources().map(resource => this.entry(resource).check(true)));
+        const results = await Promise.allSettled(this.resources().map(resource => this.entry(resource).check(true)));
+        const errors = results.filter((result): result is PromiseRejectedResult => result.status === 'rejected').map(result => result.reason as unknown);
+        if (errors.length === 1) throw errors[0];
+        if (errors.length) throw new AggregateError(errors, 'Some workspace toolchain updates failed.');
     }
 
     async install(resource: vscode.Uri | undefined, report: (message: string) => void): Promise<{ release: string; target: string }> {
@@ -117,6 +200,11 @@ export class WorkspaceToolchains {
         return installed;
     }
 
+    async documentsChanged(): Promise<void> {
+        for (const resource of this.resources()) this.entry(resource);
+        await Promise.all(this.resources().map(resource => this.bootstrap(resource)));
+    }
+
     async configurationChanged(event?: vscode.ConfigurationChangeEvent): Promise<void> {
         if (this.stopped) return;
         const resources = this.resources();
@@ -126,7 +214,9 @@ export class WorkspaceToolchains {
             if (!keys.has(key)) {
                 this.entries.delete(key);
                 pending.push(entry.updates.dispose());
-            } else if (!event || event.affectsConfiguration('teal.toolchain', entry.resource)) pending.push(entry.updates.configurationChanged());
+            } else if (!event || event.affectsConfiguration('teal.toolchain', entry.resource)) {
+                pending.push(entry.updates.configurationChanged(), this.bootstrap(entry.resource));
+            }
         }
         for (const resource of resources) this.entry(resource);
         await Promise.all(pending);
@@ -135,6 +225,7 @@ export class WorkspaceToolchains {
     async dispose(): Promise<void> {
         this.stopped = true;
         await Promise.all([...this.entries.values()].map(entry => entry.updates.dispose()));
+        await this.queue;
         this.entries.clear();
     }
 }

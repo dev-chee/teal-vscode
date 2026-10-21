@@ -2,9 +2,11 @@ import { mkdirSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { runTests } from '@vscode/test-electron';
-import { projectRoot, runNode } from './test-support.mjs';
+import { compileTests, projectRoot, runNode } from './test-support.mjs';
 
-runNode('scripts/test.mjs');
+// 聚焦宿主用例只编译入口，普通 pnpm test 仍保留完整单测阶段。
+if (process.env.TEAL_TEST_SUITE) compileTests();
+else runNode('scripts/test.mjs');
 if (!['win32', 'linux', 'darwin'].includes(process.platform) || !['x64', 'arm64'].includes(process.arch)) {
   throw new Error('Extension host tests require Windows, Linux or macOS x64/arm64.');
 }

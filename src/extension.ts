@@ -14,13 +14,14 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const reporter = new Reporter(output);
     clients = new LanguageClients(reporter);
     const managed = clients;
-    const updater = new WorkspaceToolchains(context, force => managed.refresh(force), message => output.appendLine(message));
+    const updater = new WorkspaceToolchains(context, (force, keys) => managed.refreshScopes(keys, force), message => output.appendLine(message));
     updates = updater;
     setManagedToolchainProvider(resource => updater.directory(resource));
     const configurationChanged = (event?: vscode.ConfigurationChangeEvent) => { void updater.configurationChanged(event).catch(error => output.appendLine(`[Toolchain update] ${String(error)}`)); };
     const configuration = new DebugConfigurations();
     context.subscriptions.push(
         output,
+        vscode.workspace.onDidOpenTextDocument(() => { void updater.documentsChanged().catch(error => output.appendLine(`[Toolchain activation] ${String(error)}`)); }),
         vscode.workspace.onDidGrantWorkspaceTrust(() => configurationChanged()),
         vscode.workspace.onDidChangeWorkspaceFolders(() => configurationChanged()),
         vscode.workspace.onDidChangeConfiguration(event => {
@@ -61,7 +62,7 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     );
     await vscode.commands.executeCommand('setContext', 'teal.supported', isSupported());
     if (!isSupported()) output.appendLine('Teal tool execution requires a supported Windows, Linux or macOS Node.js workspace extension host.');
-    updater.start();
+    await updater.start();
     await managed.refresh();
 }
 

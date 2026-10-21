@@ -483,3 +483,32 @@ test('an old failed-attempt stamp cannot throttle an absent or corrupt installat
         assert.notEqual(repaired.directory, first.directory);
     } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+test('independent windows retain a fixed legacy cache after another window updates latest', async t => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-window-pins-')));
+    try {
+        const older = await archive(root, 'v1');
+        const newer = await archive(root, 'v2');
+        let selected = older;
+        let network = 0;
+        t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+            network++;
+            return String(input).startsWith('https://api.github.com/') ? Response.json([selected.release]) : new Response(selected.bytes);
+        });
+        const firstWindow = context(root);
+        const secondWindow = context(root);
+        const pinned = await installManagedToolchain(firstWindow, 'latest', nativeTarget);
+        assert.equal(await loadManagedToolchain(firstWindow, 'toolchain-v1.0.0'), pinned.directory);
+        selected = newer;
+        const latest = await updateManagedToolchain(secondWindow, 'latest', nativeTarget, { force: true });
+        assert.equal(latest?.release, 'toolchain-v2.0.0');
+        const before = network;
+        const reopenedWindow = context(root);
+        assert.equal(await loadManagedToolchain(reopenedWindow, 'toolchain-v1.0.0'), pinned.directory);
+        assert.equal(await loadManagedToolchain(reopenedWindow, 'latest'), latest?.directory);
+        assert.equal(await loadManagedToolchain(reopenedWindow, 'toolchain-v3.0.0'), undefined);
+        assert.equal(await loadManagedToolchain(reopenedWindow, 'latest', [latest!.directory]), pinned.directory);
+        assert.equal(network, before, 'offline cache selection must never fetch');
+        assert.equal(await readFile(path.join(pinned.directory, 'runtime/resource.txt'), 'utf8'), 'runtime v1');
+    } finally { await rm(root, { recursive: true, force: true }); }
+});

@@ -175,3 +175,32 @@ test('failed disposal retains its handle, stops other roots and prevents duplica
         assert.equal(f.count(f.child), 2);
     } finally { await f.dispose(); }
 });
+
+test('strict toolchain refresh propagates startup failure and preserves unrelated roots', async () => {
+    const f = await fixture();
+    const start = f.host.start;
+    try {
+        f.host.start = async group => { if (group.key === f.parent.key) throw new Error('new LSP failed'); return start(group); };
+        await assert.rejects(f.manager.refreshScopes([f.parent.key], true), /could not be started/);
+        assert.equal(f.created[0].disposed, true);
+        assert.equal(f.created[1].disposed, false);
+        assert.equal(f.errors.splice(0).length, 1);
+        f.host.start = start;
+        await f.manager.refreshScopes([f.parent.key], true);
+        assert.equal(f.count(f.parent), 2);
+        assert.equal(f.count(f.child), 1);
+        assert.equal(f.manager.owner(f.main.path), f.parent.key);
+    } finally { await f.dispose(); }
+});
+
+test('scoped refresh leaves pending disk and configuration events for other roots', async () => {
+    const f = await fixture();
+    try {
+        f.manager.diskChanged(document(path.join(f.child.root, 'other.tl')));
+        f.manager.schedule(true);
+        await f.manager.refreshScopes([f.parent.key]);
+        assert.equal(f.count(f.child), 1);
+        await f.manager.refresh();
+        assert.equal(f.count(f.child), 2);
+    } finally { await f.dispose(); }
+});

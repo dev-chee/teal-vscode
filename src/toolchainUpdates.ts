@@ -16,7 +16,7 @@ export interface UpdateHost {
 /** 宿主事件适配之外的更新调度；准备完成先于 LSP 刷新，避免首次安装互相等待。 */
 export class ToolchainUpdates {
     private operation: Promise<string | undefined> | undefined;
-    private preparation: Promise<unknown> = Promise.resolve();
+    private preparation: Promise<{ directory: string | undefined; release: string } | undefined> = Promise.resolve(undefined);
     private cancellation: AbortController | undefined;
     private timer: ReturnType<typeof setInterval> | undefined;
     private stopped = false;
@@ -31,6 +31,13 @@ export class ToolchainUpdates {
     }
 
     async ready(): Promise<void> { await this.preparation.catch(() => {}); }
+
+    /** 首次启动只等待下载完成，不能等待由该进程参与完成的语言服务刷新。 */
+    async preparedDirectory(release: string): Promise<string | undefined> {
+        const cancellation = this.cancellation;
+        const prepared = await this.preparation.catch(() => undefined);
+        return !cancellation?.signal.aborted && prepared?.release === release ? prepared.directory : undefined;
+    }
 
     check(force = false): Promise<string | undefined> {
         if (this.stopped) return Promise.resolve(undefined);

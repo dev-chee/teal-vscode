@@ -106,6 +106,14 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == Linux ]]; then xvfb-run --auto-servernum pnpm test; else pnpm test; fi
 
+      - name: Toolchain activation recovery in VS Code
+        if: matrix.extensionHost
+        shell: bash
+        env:
+          TEAL_TEST_SUITE: toolchainRecovery.host.js
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then xvfb-run --auto-servernum pnpm test; else pnpm test; fi
+
       - uses: docker/setup-qemu-action@v3
         if: matrix.target == 'linux-armhf'
         with:

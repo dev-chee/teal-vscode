@@ -55,7 +55,16 @@ export class LanguageSessions<Group extends LanguageGroup> {
     }
 
     refresh(force = false): Promise<void> {
-        const operation = this.queue.then(() => this.reconcile(force));
+        return this.enqueue(force);
+    }
+
+    /** 工具链切换只刷新受影响的根；启动错误必须返回给更新器以恢复旧选择。 */
+    refreshScopes(keys: readonly string[], force = false): Promise<void> {
+        return this.enqueue(force, new Set(keys), true);
+    }
+
+    private enqueue(force: boolean, keys?: ReadonlySet<string>, strict = false): Promise<void> {
+        const operation = this.queue.then(() => this.reconcile(force, keys, strict));
         this.queue = operation.catch(() => {});
         return operation;
     }
@@ -72,23 +81,25 @@ export class LanguageSessions<Group extends LanguageGroup> {
         }
     }
 
-    private async reconcile(force: boolean): Promise<void> {
+    private async reconcile(force: boolean, keys?: ReadonlySet<string>, strict = false): Promise<void> {
         const groups = new Map((this.stopping ? [] : this.host.groups()).map((group) => [group.key, group]));
         const dirty = new Set(this.dirtyRoots);
-        this.dirtyRoots.clear();
+        for (const key of dirty) if (!keys || keys.has(key)) this.dirtyRoots.delete(key);
         force ||= this.forcePending;
-        this.forcePending = false;
+        if (!keys) this.forcePending = false;
         const signature = (group: Group) => group.documents.map((document) => document.uri).sort().join('\n');
         const failures: unknown[] = [];
         for (const [key, current] of [...this.sessions]) {
+            if (keys && !keys.has(key)) continue;
             const group = groups.get(key);
-            if (!group || force || dirty.has(key) || current.signature !== signature(group)) {
+            if (!group || force || dirty.has(key) || current.signature !== signature(group) || strict && !current.session.isRunning()) {
                 try { await this.stop(key, current.session); }
                 catch (error) { failures.push(error); }
             }
         }
         if (failures.length) throw new AggregateError(failures, 'Some Teal language sessions could not be stopped.');
         for (const [key, group] of groups) {
+            if (keys && !keys.has(key)) continue;
             if (this.stopping) break;
             if (this.sessions.has(key)) continue;
             try {
@@ -96,8 +107,12 @@ export class LanguageSessions<Group extends LanguageGroup> {
                 const session = await this.host.start(group);
                 this.sessions.set(key, { group, session, signature: documentSignature });
                 if (this.stopping) await this.stop(key, session);
-            } catch (error) { this.host.report(error); }
+            } catch (error) {
+                this.host.report(error);
+                if (strict) failures.push(error);
+            }
         }
+        if (failures.length) throw new AggregateError(failures, 'Some Teal language sessions could not be started.');
     }
 
     async dispose(): Promise<void> {

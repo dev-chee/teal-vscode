@@ -78,22 +78,34 @@ async function findToolchainRoot(root: string): Promise<string | undefined> {
     return undefined;
 }
 
-async function readManagedState(context: ManagedToolchainStorage): Promise<ManagedState | undefined> {
+async function readManagedRecords(context: ManagedToolchainStorage): Promise<ManagedState[]> {
     try {
-        const value = parseManagedState(JSON.parse(await readFile(path.join(managedRoot(context), 'current.json'), 'utf8')), currentToolchainTarget());
-        if (!value) return undefined;
-        const toolchain = await inspectToolchain(value.directory);
-        if (!isCompleteToolchain(toolchain)) return undefined;
-        await verifyToolchainDistribution(toolchain.directory, value.target);
-        return { ...value, directory: toolchain.directory };
-    } catch {
-        return undefined;
-    }
+        const value = JSON.parse(await readFile(path.join(managedRoot(context), 'current.json'), 'utf8'));
+        const records = [value, ...(Array.isArray(value?.previous) ? value.previous : [])];
+        const seen = new Set<string>();
+        const target = currentToolchainTarget();
+        return records.map(record => parseManagedState(record, target)).filter((record): record is ManagedState => {
+            if (!record || seen.has(record.directory)) return false;
+            seen.add(record.directory);
+            return true;
+        });
+    } catch { return []; }
 }
 
-export async function loadManagedToolchain(context: ManagedToolchainStorage, release?: string): Promise<string | undefined> {
-    const state = await readManagedState(context);
-    return state && (!release || release === 'latest' || state.release === release) ? state.directory : undefined;
+async function readManagedState(context: ManagedToolchainStorage, release = 'latest', excluded: readonly string[] = []): Promise<ManagedState | undefined> {
+    const tag = release.trim() || 'latest';
+    for (const value of await readManagedRecords(context)) try {
+        if (excluded.includes(value.directory) || tag.toLowerCase() !== 'latest' && value.release !== tag) continue;
+        const toolchain = await inspectToolchain(value.directory);
+        if (!isCompleteToolchain(toolchain)) continue;
+        await verifyToolchainDistribution(toolchain.directory, value.target);
+        return { ...value, directory: toolchain.directory };
+    } catch { /* 失败代次或损坏缓存不能阻止恢复较旧的已校验安装。 */ }
+    return undefined;
+}
+
+export async function loadManagedToolchain(context: ManagedToolchainStorage, release = 'latest', excluded: readonly string[] = []): Promise<string | undefined> {
+    return (await readManagedState(context, release, excluded))?.directory;
 }
 
 export async function installManagedToolchain(
@@ -194,7 +206,9 @@ async function installLocked(
         const temporaryState = path.join(staging, 'selection.json');
         const file = await open(temporaryState, 'wx', 0o600);
         try {
-            await file.writeFile(JSON.stringify(state, null, 2), 'utf8');
+            // 选择与历史引用一次原子发布，供旧窗口固定版本及 LSP 失败回滚使用。
+            const previous = (await readManagedRecords(context)).filter(record => record.directory !== state.directory);
+            await file.writeFile(JSON.stringify({ ...state, previous }, null, 2), 'utf8');
             await file.sync();
         } catch (error) {
             try { await file.close(); }

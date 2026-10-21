@@ -116,6 +116,8 @@ export class LanguageClients {
 
     refresh(force = false): Promise<void> { return this.sessions.refresh(force); }
 
+    refreshScopes(keys: readonly string[], force = false): Promise<void> { return this.sessions.refreshScopes(keys, force); }
+
     async dispose(): Promise<void> {
         for (const subscription of this.subscriptions) subscription.dispose();
         await this.sessions.dispose();
