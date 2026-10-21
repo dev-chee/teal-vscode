@@ -16,6 +16,7 @@ export interface LanguageSessionHost<Group extends LanguageGroup> {
     groups(): readonly Group[];
     start(group: Group): Promise<LanguageSession>;
     report(error: unknown): void;
+    changed?(): void;
 }
 
 /** 串行管理会话和刷新事件；编辑器事件与实际进程由宿主提供。 */
@@ -68,7 +69,7 @@ export class LanguageSessions<Group extends LanguageGroup> {
     }
 
     private enqueue(force: boolean, keys?: ReadonlySet<string>, strict = false): Promise<void> {
-        const operation = this.queue.then(() => this.reconcile(force, keys, strict));
+        const operation = this.queue.then(() => this.reconcile(force, keys, strict)).finally(() => this.host.changed?.());
         this.queue = operation.catch(() => {});
         return operation;
     }

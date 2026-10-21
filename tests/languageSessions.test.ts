@@ -241,3 +241,25 @@ test('scoped refresh leaves pending disk and configuration events for other root
         assert.equal(f.count(f.child), 2);
     } finally { await f.dispose(); }
 });
+
+test('diagnostic ownership is refreshed after startup, removal and failed scoped refresh', async () => {
+    const f = await fixture(false);
+    const owners: Array<string | undefined> = [];
+    f.host.changed = () => { owners.push(f.manager.owner(f.lib.path)); };
+    const start = f.host.start;
+    try {
+        await f.manager.refresh();
+        assert.equal(owners.at(-1), f.child.key);
+        f.host.start = async group => { if (group.key === f.child.key) throw new Error('child start failed'); return start(group); };
+        await assert.rejects(f.manager.refreshScopes([f.child.key], true), /could not be started/);
+        assert.equal(owners.at(-1), f.parent.key, 'failed startup also changes diagnostic ownership');
+        assert.equal(f.errors.splice(0).length, 1);
+        f.host.start = start;
+        await f.manager.refresh();
+        assert.equal(owners.at(-1), f.child.key);
+        f.groups.splice(1);
+        await f.manager.refresh();
+        assert.equal(owners.at(-1), f.parent.key);
+    } finally { await f.dispose(); }
+    assert.equal(owners.at(-1), undefined);
+});

@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import Module, { createRequire } from 'node:module';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import * as executables from '../src/languageServerExecutable';
 import type { Reporter } from '../src/reporting';
+import type { LanguageClientOptions } from 'vscode-languageclient/node';
+import { isWithinRoot } from '../src/platform';
 
 const loader = Module as unknown as { _load(request: string, parent: NodeModule | undefined, isMain?: boolean): unknown };
 const originalLoad = loader._load;
@@ -18,11 +20,17 @@ let executableFile = '';
 let disposedClients = 0;
 let disposedWatchers = 0;
 const folder = { uri: { fsPath: tmpdir(), toString: () => pathToFileURL(tmpdir()).toString() }, name: 'fixture', index: 0 };
+let folders: Array<typeof folder> = [];
+const clientOptions: LanguageClientOptions[] = [];
+function fileUri(file: string) {
+    const uri = { scheme: 'file', fsPath: file, query: '', fragment: '', toString: () => pathToFileURL(file).toString(), with: () => uri };
+    return uri;
+}
 const vscode = {
     workspace: {
         isTrusted: true,
         textDocuments: [{ uri: { scheme: 'file', fsPath: path.join(tmpdir(), 'main.tl'), toString: () => pathToFileURL(path.join(tmpdir(), 'main.tl')).toString() }, languageId: 'teal', isClosed: false }],
-        getWorkspaceFolder: () => folder,
+        getWorkspaceFolder: (uri: { fsPath: string }) => folders.filter(item => isWithinRoot(item.uri.fsPath, uri.fsPath)).sort((a, b) => b.uri.fsPath.length - a.uri.fsPath.length)[0] ?? folder,
         getConfiguration: () => ({ get: () => entries }),
         onDidOpenTextDocument: noop, onDidCloseTextDocument: noop,
         onDidChangeWorkspaceFolders: noop, onDidGrantWorkspaceTrust: noop, onDidChangeConfiguration: noop,
@@ -34,17 +42,21 @@ const vscode = {
             }, onDidChange: noop, onDidDelete: noop };
         },
     },
-    Uri: { file: (file: string) => ({ fsPath: file, toString: () => pathToFileURL(file).toString() }) },
+    Uri: { file: fileUri, parse: (value: string) => fileUri(fileURLToPath(value)) },
     RelativePattern: class {},
     Disposable: { from: (...items: Array<{ dispose(): void }>) => ({ dispose() { items.forEach(item => item.dispose()); } }) },
 };
 class Client {
     state = 2;
-    constructor() { if (fault === 'constructor') throw new Error('client construction failed'); }
+    constructor(_id: string, _name: string, _server: unknown, options: LanguageClientOptions) {
+        if (fault === 'constructor') throw new Error('client construction failed');
+        clientOptions.push(options);
+    }
     onDidChangeState = noop;
     async start() { if (fault === 'start') throw new Error('client startup failed'); }
     async dispose() { disposedClients++; }
 }
+
 loader._load = (request, parent, isMain) => {
     if (request === 'vscode') return vscode;
     if (request === 'vscode-languageclient/node') return { LanguageClient: Client, State: { Running: 2 }, CloseAction: {}, ErrorAction: {} };
@@ -94,3 +106,44 @@ for (const failure of ['configuration', 'constructor', 'watcher', 'listener', 's
         }
     });
 }
+
+test('existing clients map cross-root results to a child buffer opened after parent startup', async () => {
+    const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-client-uri-')));
+    const documents = [...vscode.workspace.textDocuments];
+    const actual = path.join(directory, 'real');
+    const alias = path.join(directory, 'alias');
+    const nested = path.join(actual, 'child');
+    const inner = path.join(nested, 'inner.tl');
+    const main = path.join(alias, 'main.tl');
+    await mkdir(nested, { recursive: true });
+    await symlink(actual, alias, 'junction');
+    await writeFile(path.join(actual, 'main.tl'), '');
+    await writeFile(inner, '');
+    executableFile = path.join(directory, 'teal-lsp.exe');
+    await writeFile(executableFile, 'fixture executable, never executed');
+    folders = [{ uri: fileUri(alias), name: 'parent', index: 0 }, { uri: fileUri(nested), name: 'child', index: 1 }];
+    vscode.workspace.textDocuments.splice(0, documents.length, { uri: fileUri(main), languageId: 'teal', isClosed: false });
+    clientOptions.length = 0;
+    fault = undefined; entries = [];
+    const errors: unknown[] = [];
+    const clients = new LanguageClients({ report: (error: unknown) => { errors.push(error); }, output: { appendLine() {} } } as unknown as Reporter);
+    try {
+        await clients.refresh();
+        const parent = clientOptions[0];
+        assert.equal(parent.uriConverters?.protocol2Code(pathToFileURL(inner).toString()).fsPath, path.join(alias, 'child', 'inner.tl'));
+        vscode.workspace.textDocuments.push({ uri: fileUri(inner), languageId: 'teal', isClosed: false });
+        await clients.refresh();
+        assert.equal(clientOptions.length, 2, 'the parent client must stay alive');
+        assert.equal(parent.uriConverters?.protocol2Code(pathToFileURL(inner).toString()).fsPath, inner, 'the existing client must prefer the new child buffer');
+        vscode.workspace.textDocuments.pop();
+        await clients.refresh();
+        assert.equal(parent.uriConverters?.protocol2Code(pathToFileURL(inner).toString()).fsPath, path.join(alias, 'child', 'inner.tl'), 'removing the child must release its URI mapping');
+        assert.deepEqual(errors, []);
+    } finally {
+        await clients.dispose();
+        await executables.disposeLanguageServerExecutables();
+        folders = [];
+        vscode.workspace.textDocuments.splice(0, vscode.workspace.textDocuments.length, ...documents);
+        await rm(directory, { recursive: true, force: true });
+    }
+});

@@ -1,7 +1,7 @@
 import * as assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import Mocha from 'mocha';
@@ -279,7 +279,7 @@ export function run(): Promise<void> {
                     assert.equal(matched.filter((item) => item.name === outerName).length, 1, 'outer declaration must not be duplicated by the nested server');
                     assert.equal(matched.filter((item) => item.name === innerName).length, 1, 'nested declaration must not be duplicated by the outer server');
                     assert.ok(matched.some((item) => item.name === innerName
-                        && path.normalize(item.location.uri.fsPath).toLocaleLowerCase() === path.normalize(inner).toLocaleLowerCase()), 'nested symbol must retain its exact file URI');
+                        && path.normalize(item.location.uri.fsPath).toLocaleLowerCase() === path.normalize(inner).toLocaleLowerCase()), `nested symbol must retain its exact file URI: expected ${inner}; got ${matched.map(item => item.location.uri.fsPath).join(', ')}`);
                 } finally {
                     await vscode.commands.executeCommand('workbench.action.closeAllEditors');
                     if ((vscode.workspace.workspaceFolders?.length ?? 0) > anchorCount) {
@@ -290,6 +290,94 @@ export function run(): Promise<void> {
                 }
             });
         }
+
+        for (const linked of [false, true]) {
+            test(`serves concrete LSP URI mappings for ${linked ? 'linked' : 'regular'} workspace buffers`, async () => {
+                const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-uri-')));
+                const actual = path.join(directory, 'real');
+                const root = linked ? path.join(directory, 'alias') : actual;
+                const name = '中文 # [uri].tl';
+                const source = path.join(root, name);
+                const anchorCount = vscode.workspace.workspaceFolders?.length ?? 0;
+                const text = 'fn helper(value: int) -> int { return value; }\nfn main() { print(helper(1)); }\n';
+                try {
+                    await mkdir(actual);
+                    if (linked) await symlink(actual, root, 'junction');
+                    await writeFile(path.join(actual, name), text);
+                    await vscode.workspace.getConfiguration('teal').update('toolchain.path', process.env.TEAL_TOOLCHAIN_PATH!, vscode.ConfigurationTarget.Global);
+                    await updateFolders(anchorCount, 0, { uri: vscode.Uri.file(root), name: 'URI regression' });
+                    const document = await vscode.workspace.openTextDocument(vscode.Uri.file(source));
+                    const editor = await vscode.window.showTextDocument(document);
+                    await waitFor(async () => (await vscode.commands.executeCommand<vscode.DocumentSymbol[]>('vscode.executeDocumentSymbolProvider', document.uri))?.some(item => item.name === 'helper') ? true : undefined,
+                        'the opened document must be served before testing URI mapping');
+                    const replace = (value: string) => editor.edit(builder => builder.replace(new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), value));
+                    assert.equal(await replace(text.replace('helper(1)', 'helper(missing_uri_name)')), true);
+                    await waitFor(async () => vscode.languages.getDiagnostics(document.uri).some(item => item.message.includes('missing_uri_name')) ? true : undefined,
+                        'diagnostics must use the opened document URI');
+                    assert.equal(await replace(text.replace('helper(1)', 'helper(7)')), true);
+                    await waitFor(async () => vscode.languages.getDiagnostics(document.uri).length === 0 ? true : undefined, 'the corrected alias buffer must clear its diagnostic');
+                    const position = document.positionAt(document.getText().indexOf('helper(7)') + 2);
+                    const definitions = await vscode.commands.executeCommand<vscode.Location[]>('vscode.executeDefinitionProvider', document.uri, position);
+                    assert.equal(definitions?.[0]?.uri.toString(), document.uri.toString());
+                    const edit = await vscode.commands.executeCommand<vscode.WorkspaceEdit>('vscode.executeDocumentRenameProvider', document.uri, position, 'renamed');
+                    assert.equal(edit?.get(document.uri).length, 2, 'both rename edits must target the current buffer');
+                    assert.equal(await vscode.workspace.applyEdit(edit!), true);
+                    assert.ok(document.getText().includes('fn renamed(') && document.getText().includes('renamed(7)'));
+                    assert.equal(document.isDirty, true);
+                    assert.equal(await readFile(path.join(actual, name), 'utf8'), text, 'rename must preserve unsaved buffer ownership');
+                    await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+                } finally {
+                    await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+                    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+                    if ((vscode.workspace.workspaceFolders?.length ?? 0) > anchorCount) {
+                        await updateFolders(anchorCount, (vscode.workspace.workspaceFolders?.length ?? 0) - anchorCount);
+                    }
+                    await closeAndRemove(directory);
+                }
+            });
+        }
+
+        test('serves concrete LSP diagnostics after a nested workspace takes ownership of a buffer', async () => {
+            const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-diagnostics-')));
+            const nested = path.join(root, 'child');
+            const outer = vscode.Uri.file(path.join(root, 'outer.tl'));
+            const inner = vscode.Uri.file(path.join(nested, 'inner.tl'));
+            const probe = vscode.Uri.file(path.join(root, 'probe.tli'));
+            const anchorCount = vscode.workspace.workspaceFolders?.length ?? 0;
+            const errors = (uri: vscode.Uri) => vscode.languages.getDiagnostics(uri).filter(item => item.severity === vscode.DiagnosticSeverity.Error);
+            try {
+                await mkdir(nested);
+                await writeFile(outer.fsPath, 'fn main() { print(1); }\n');
+                await writeFile(inner.fsPath, 'fn main() { print(missing_child_name); }\n');
+                await vscode.workspace.getConfiguration('teal').update('toolchain.path', process.env.TEAL_TOOLCHAIN_PATH!, vscode.ConfigurationTarget.Global);
+                await updateFolders(anchorCount, 0, { uri: vscode.Uri.file(root), name: 'parent' }, { uri: vscode.Uri.file(nested), name: 'child' });
+                await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(outer));
+                await waitFor(async () => (await vscode.commands.executeCommand<vscode.DocumentSymbol[]>('vscode.executeDocumentSymbolProvider', outer))?.some(item => item.name === 'main') ? true : undefined,
+                    'the parent client must be running');
+                await waitForWatcher(() => writeFile(probe.fsPath, 'builtin global { fn broken( }\n'),
+                    () => errors(probe).length > 0 && errors(inner).some(item => item.message.includes('missing_child_name')),
+                    'the parent must initially publish its closed child diagnostic');
+                const document = await vscode.workspace.openTextDocument(inner);
+                const editor = await vscode.window.showTextDocument(document);
+                await waitFor(async () => (await vscode.commands.executeCommand<vscode.DocumentSymbol[]>('vscode.executeDocumentSymbolProvider', inner))?.some(item => item.name === 'main') ? true : undefined,
+                    'the child client must take ownership');
+                const before = errors(inner).length;
+                assert.ok(before > 0);
+                const text = document.getText().replace('missing_child_name', '1');
+                assert.equal(await editor.edit(builder => builder.replace(new vscode.Range(document.positionAt(0), document.positionAt(document.getText().length)), text)), true);
+                await waitFor(async () => errors(inner).length < before ? true : undefined, 'the child client must clear its current diagnostic');
+                assert.deepEqual(errors(inner), [], 'the parent must not retain its old disk diagnostic');
+                assert.ok(errors(probe).length > 0, 'the parent must retain diagnostics it still owns');
+                await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+            } finally {
+                await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+                await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+                if ((vscode.workspace.workspaceFolders?.length ?? 0) > anchorCount) {
+                    await updateFolders(anchorCount, (vscode.workspace.workspaceFolders?.length ?? 0) - anchorCount);
+                }
+                await closeAndRemove(root);
+            }
+        });
 
         test('refreshes LSP symbols after disk create, change, delete, and an explicit restart', async () => {
             const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-watch-'));
