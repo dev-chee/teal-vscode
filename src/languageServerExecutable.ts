@@ -1,4 +1,4 @@
-import { copyFile, mkdtemp, rm, stat } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, rm, stat } from 'node:fs/promises';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 
@@ -12,8 +12,13 @@ const stagedExecutables = new Set<string>();
  */
 export async function stageLanguageServerExecutable(source: string, platform: NodeJS.Platform = process.platform): Promise<string> {
     if (platform !== 'win32') return source;
-    stagingDirectory ??= mkdtemp(path.join(tmpdir(), 'teal-vscode-lsp-'));
-    const directory = await stagingDirectory;
+    const pending = stagingDirectory ??= mkdtemp(path.join(tmpdir(), 'teal-vscode-lsp-'));
+    const directory = await pending.catch((error: unknown) => {
+        if (stagingDirectory === pending) stagingDirectory = undefined;
+        throw error;
+    });
+    // Temporary-file cleanup may remove the directory between server runs.
+    await mkdir(directory, { recursive: true });
     const staged = path.join(directory, `${sequence++}-teal-lsp.exe`);
     await copyFile(source, staged);
     stagedExecutables.add(staged);
@@ -46,7 +51,7 @@ export async function disposeLanguageServerExecutables(): Promise<void> {
     stagedExecutables.clear();
     await Promise.all(files.map((file) => rm(file, { force: true }).catch(() => undefined)));
     if (directoryPromise) {
-        const directory = await directoryPromise;
-        await rm(directory, { recursive: true, force: true }).catch(() => undefined);
+        const directory = await directoryPromise.catch(() => undefined);
+        if (directory) await rm(directory, { recursive: true, force: true }).catch(() => undefined);
     }
 }

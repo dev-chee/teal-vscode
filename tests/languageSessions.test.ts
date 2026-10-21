@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { tmpdir } from 'node:os';
 import { pathToFileURL } from 'node:url';
@@ -144,6 +145,42 @@ test('symbol ownership selects the deepest running root and ignores similar pref
         assert.equal(f.manager.owner(f.lib.path), 'parent');
         assert.equal(f.manager.owner(`${f.parent.root}-other/main.tl`), undefined);
     } finally { await f.dispose(); }
+});
+
+test('symbol ownership resolves linked roots and ranks nested roots by their real paths', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'teal-session-links-'));
+    const root = await realpath(directory);
+    const actual = path.join(root, 'real');
+    const nested = path.join(actual, 'nested');
+    const alias = path.join(root, 'a much longer workspace alias');
+    await mkdir(nested, { recursive: true });
+    await symlink(actual, alias, 'junction');
+    const outer = path.join(actual, 'outer.tl');
+    const inner = path.join(nested, 'inner.tl');
+    await writeFile(outer, '');
+    await writeFile(inner, '');
+    const groups = [
+        { key: 'alias', root: alias, documents: [document(path.join(alias, 'outer.tl'))] },
+        { key: 'nested', root: nested, documents: [document(inner)] },
+    ];
+    const running = new Set(groups.map(group => group.key));
+    const manager = new LanguageSessions({
+        groups: () => groups,
+        start: async group => ({ isRunning: () => running.has(group.key), dispose: async () => { running.delete(group.key); } }),
+        report: error => { throw error; },
+    });
+    try {
+        await manager.refresh();
+        assert.equal(manager.owner(outer), 'alias', 'canonical LSP locations belong to the linked workspace');
+        assert.equal(manager.owner(inner), 'nested', 'the longer alias must not hide the deeper real root');
+        assert.equal(manager.owner(path.join(alias, 'unsaved.tl')), 'alias', 'original editor paths remain supported');
+        assert.equal(manager.owner(path.join(root, 'real-sibling', 'other.tl')), undefined);
+        running.delete('nested');
+        assert.equal(manager.owner(inner), 'alias', 'stopped nested sessions fall back to the parent');
+    } finally {
+        await manager.dispose();
+        await rm(directory, { recursive: true, force: true });
+    }
 });
 
 test('document order does not restart a client but removing its root disposes it', async () => {

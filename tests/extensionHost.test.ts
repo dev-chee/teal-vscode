@@ -1,7 +1,7 @@
 import * as assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import Mocha from 'mocha';
@@ -25,6 +25,19 @@ export function run(): Promise<void> {
                 await new Promise((resolve) => setTimeout(resolve, 150));
             }
             throw new Error(message);
+        }
+
+        async function updateFolders(...args: Parameters<typeof vscode.workspace.updateWorkspaceFolders>): Promise<void> {
+            let changed = false;
+            const listener = vscode.workspace.onDidChangeWorkspaceFolders(() => { changed = true; });
+            try {
+                if (!vscode.workspace.updateWorkspaceFolders(...args)) {
+                    await waitFor(async () => changed ? true : undefined, 'previous workspace folder change must complete');
+                    changed = false;
+                    assert.equal(vscode.workspace.updateWorkspaceFolders(...args), true);
+                }
+                await waitFor(async () => changed ? true : undefined, 'workspace folder change must complete');
+            } finally { listener.dispose(); }
         }
 
         async function closeAndRemove(directory: string): Promise<void> {
@@ -222,43 +235,51 @@ export function run(): Promise<void> {
             }
         });
 
-        test('keeps nested multi-root workspace symbols isolated to one language client', async () => {
-            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-multiroot-'));
-            const nested = path.join(root, 'nested root');
-            const outer = path.join(root, 'outer.tl');
-            const inner = path.join(nested, 'inner.tl');
-            const anchorCount = vscode.workspace.workspaceFolders?.length ?? 0;
-            try {
-                await writeFile(outer, 'fn outer_symbol() { }\n');
-                await mkdir(nested, { recursive: true });
-                await writeFile(inner, 'fn inner_symbol() { }\n');
-                assert.ok(anchorCount >= 1, 'the test runner must retain its initial workspace anchor');
-                assert.equal(vscode.workspace.updateWorkspaceFolders(anchorCount, 0,
-                    { uri: vscode.Uri.file(root), name: 'outer root' },
-                    { uri: vscode.Uri.file(nested), name: 'nested root' }), true);
-                await waitFor(async () => vscode.workspace.workspaceFolders?.length === anchorCount + 2 ? true : undefined, 'two workspace roots must be installed');
-                const outerDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(outer));
-                const innerDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(inner));
-                await vscode.window.showTextDocument(outerDocument);
-                await vscode.window.showTextDocument(innerDocument);
-                const symbols = await waitFor(async () => {
-                    const items = await vscode.commands.executeCommand<vscode.SymbolInformation[]>('vscode.executeWorkspaceSymbolProvider', 'symbol');
-                    return items?.filter((item) => item.name === 'outer_symbol' || item.name === 'inner_symbol').length === 2 ? items : undefined;
-                }, 'both roots must publish workspace symbols');
-                const matched = symbols.filter((item) => item.name === 'outer_symbol' || item.name === 'inner_symbol');
-                assert.equal(matched.filter((item) => item.name === 'outer_symbol').length, 1, 'outer declaration must not be duplicated by the nested server');
-                assert.equal(matched.filter((item) => item.name === 'inner_symbol').length, 1, 'nested declaration must not be duplicated by the outer server');
-                assert.ok(matched.some((item) => item.name === 'inner_symbol'
-                    && path.normalize(item.location.uri.fsPath).toLocaleLowerCase() === path.normalize(inner).toLocaleLowerCase()), 'nested symbol must retain its exact file URI');
-            } finally {
-                await vscode.commands.executeCommand('workbench.action.closeAllEditors');
-                if ((vscode.workspace.workspaceFolders?.length ?? 0) > anchorCount) {
-                    vscode.workspace.updateWorkspaceFolders(anchorCount, (vscode.workspace.workspaceFolders?.length ?? 0) - anchorCount);
-                    await waitFor(async () => vscode.workspace.workspaceFolders?.length === anchorCount ? true : undefined, 'test workspace roots must be removed');
+        for (const linked of [false, true]) {
+            test(linked ? 'serves concrete LSP workspace symbols through linked roots and nested real roots'
+                : 'keeps nested multi-root workspace symbols isolated to one language client', async () => {
+                const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-multiroot-')));
+                const actual = linked ? path.join(directory, 'real') : directory;
+                const root = linked ? path.join(directory, 'a much longer workspace alias') : actual;
+                const nested = path.join(actual, 'nested root');
+                const outer = path.join(root, 'outer.tl');
+                const inner = path.join(nested, 'inner.tl');
+                const outerName = linked ? 'linked_outer_symbol' : 'direct_outer_symbol';
+                const innerName = linked ? 'linked_inner_symbol' : 'direct_inner_symbol';
+                const anchorCount = vscode.workspace.workspaceFolders?.length ?? 0;
+                try {
+                    await mkdir(nested, { recursive: true });
+                    if (linked) await symlink(actual, root, 'junction');
+                    await writeFile(outer, `fn ${outerName}() { }\n`);
+                    await writeFile(inner, `fn ${innerName}() { }\n`);
+                    assert.ok(anchorCount >= 1, 'the test runner must retain its initial workspace anchor');
+                    await updateFolders(anchorCount, 0,
+                        { uri: vscode.Uri.file(root), name: 'outer root' },
+                        { uri: vscode.Uri.file(nested), name: 'nested root' });
+                    await waitFor(async () => vscode.workspace.workspaceFolders?.length === anchorCount + 2 ? true : undefined, 'two workspace roots must be installed');
+                    const outerDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(outer));
+                    const innerDocument = await vscode.workspace.openTextDocument(vscode.Uri.file(inner));
+                    await vscode.window.showTextDocument(outerDocument);
+                    await vscode.window.showTextDocument(innerDocument);
+                    const symbols = await waitFor(async () => {
+                        const items = await vscode.commands.executeCommand<vscode.SymbolInformation[]>('vscode.executeWorkspaceSymbolProvider', 'symbol');
+                        return items?.filter((item) => item.name === outerName || item.name === innerName).length === 2 ? items : undefined;
+                    }, 'both roots must publish workspace symbols');
+                    const matched = symbols.filter((item) => item.name === outerName || item.name === innerName);
+                    assert.equal(matched.filter((item) => item.name === outerName).length, 1, 'outer declaration must not be duplicated by the nested server');
+                    assert.equal(matched.filter((item) => item.name === innerName).length, 1, 'nested declaration must not be duplicated by the outer server');
+                    assert.ok(matched.some((item) => item.name === innerName
+                        && path.normalize(item.location.uri.fsPath).toLocaleLowerCase() === path.normalize(inner).toLocaleLowerCase()), 'nested symbol must retain its exact file URI');
+                } finally {
+                    await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+                    if ((vscode.workspace.workspaceFolders?.length ?? 0) > anchorCount) {
+                        await updateFolders(anchorCount, (vscode.workspace.workspaceFolders?.length ?? 0) - anchorCount);
+                        await waitFor(async () => vscode.workspace.workspaceFolders?.length === anchorCount ? true : undefined, 'test workspace roots must be removed');
+                    }
+                    await closeAndRemove(directory);
                 }
-                await closeAndRemove(root);
-            }
-        });
+            });
+        }
 
         test('refreshes LSP symbols after disk create, change, delete, and an explicit restart', async () => {
             const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-watch-'));

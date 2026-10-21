@@ -1,3 +1,4 @@
+import { realpath } from 'node:fs/promises';
 import { isWithinRoot } from './platform';
 
 export interface LanguageGroup {
@@ -19,7 +20,7 @@ export interface LanguageSessionHost<Group extends LanguageGroup> {
 
 /** 串行管理会话和刷新事件；编辑器事件与实际进程由宿主提供。 */
 export class LanguageSessions<Group extends LanguageGroup> {
-    private readonly sessions = new Map<string, { group: Group; signature: string; session: LanguageSession }>();
+    private readonly sessions = new Map<string, { group: Group; root: string; signature: string; session: LanguageSession }>();
     private readonly dirtyRoots = new Set<string>();
     private queue: Promise<void> = Promise.resolve();
     private timer: ReturnType<typeof setTimeout> | undefined;
@@ -39,9 +40,12 @@ export class LanguageSessions<Group extends LanguageGroup> {
     }
 
     owner(file: string): string | undefined {
-        let owner: LanguageGroup | undefined;
-        for (const { group, session } of this.sessions.values()) {
-            if (session.isRunning() && isWithinRoot(group.root, file) && (!owner || group.root.length > owner.root.length)) owner = group;
+        let owner: { key: string; root: string } | undefined;
+        for (const { group, root, session } of this.sessions.values()) {
+            // LSP locations use canonical paths; editor documents retain workspace aliases.
+            if (session.isRunning() && (isWithinRoot(root, file) || isWithinRoot(group.root, file)) && (!owner || root.length > owner.root.length)) {
+                owner = { key: group.key, root };
+            }
         }
         return owner?.key;
     }
@@ -105,7 +109,8 @@ export class LanguageSessions<Group extends LanguageGroup> {
             try {
                 const documentSignature = signature(group);
                 const session = await this.host.start(group);
-                this.sessions.set(key, { group, session, signature: documentSignature });
+                const root = await realpath(group.root).catch(() => group.root);
+                this.sessions.set(key, { group, root, session, signature: documentSignature });
                 if (this.stopping) await this.stop(key, session);
             } catch (error) {
                 this.host.report(error);
