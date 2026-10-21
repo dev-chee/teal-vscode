@@ -8,6 +8,7 @@ import Mocha from 'mocha';
 import * as vscode from 'vscode';
 import { DebugConfigurations } from '../src/execution';
 import { executableName } from '../src/platform';
+import { waitForWatcher } from './watcherReadiness';
 
 export function run(): Promise<void> {
     const mocha = new Mocha({ ui: 'tdd', color: true });
@@ -186,6 +187,12 @@ export function run(): Promise<void> {
             const appManifest = (relative: string) => manifest('app', 'main.tl')
                 + `[dependencies]\ndep = { path = "${relative}", version = "1.0.0" }\n`;
             const errors = () => vscode.languages.getDiagnostics(main).filter(item => item.severity === vscode.DiagnosticSeverity.Error);
+            const mismatch = (type: string) => errors().some(item => item.message.includes('Expected int') && item.message.includes(`type is ${type}`));
+            const primeWatcher = (file: string) => waitForWatcher(
+                () => writeFile(file, 'pub fn value() -> bool { return true; }\n'),
+                () => mismatch('bool'),
+                `external dependency watcher did not become ready: ${file}`,
+            );
             try {
                 for (const name of ['app', 'dep', 'replacement']) await mkdir(path.join(root, name, 'src'), { recursive: true });
                 await writeFile(path.join(app, 'package.toml'), appManifest('../dep'));
@@ -195,7 +202,7 @@ export function run(): Promise<void> {
                 await writeFile(replacement, 'pub fn value() -> int { return 2; }\n');
                 await writeFile(main.fsPath, 'use dep::lib;\nfn main() {\n    let value: int = lib::value();\n    print(value);\n}\n');
                 await vscode.workspace.getConfiguration('teal').update('toolchain.path', process.env.TEAL_TOOLCHAIN_PATH!, vscode.ConfigurationTarget.Global);
-                assert.equal(vscode.workspace.updateWorkspaceFolders(anchorCount, 0, { uri: vscode.Uri.file(app), name: 'consumer' }), true);
+                await updateFolders(anchorCount, 0, { uri: vscode.Uri.file(app), name: 'consumer' });
                 await waitFor(async () => vscode.workspace.workspaceFolders?.some(folder => folder.uri.fsPath.toLowerCase() === app.toLowerCase()) ? true : undefined, 'consumer workspace must be added');
                 const document = await vscode.workspace.openTextDocument(main);
                 await vscode.window.showTextDocument(document);
@@ -207,8 +214,12 @@ export function run(): Promise<void> {
                 }, 'external dependency must initially resolve');
                 assert.deepEqual(errors(), []);
 
+                // 首次导航可能早于外部目录系统监听的安装，先用独特诊断确认完整事件链路。
+                await primeWatcher(dependency);
+                await writeFile(dependency, 'pub fn value() -> int { return 1; }\n');
+                await waitFor(async () => errors().length === 0 ? true : undefined, 'watcher probe must recover before the single save');
                 await writeFile(dependency, 'pub fn padding() -> int { return 0; }\npub fn value() -> string { return "changed"; }\n');
-                await waitFor(async () => errors().some(item => /Expected int/.test(item.message)) ? true : undefined, 'external save must refresh consumer diagnostics without restart');
+                await waitFor(async () => mismatch('string') ? true : undefined, 'external save must refresh consumer diagnostics without restart');
                 assert.equal((await definition())?.[0]?.range.start.line, 1, 'navigation must use the changed dependency text');
 
                 await rm(dependency);
@@ -221,14 +232,13 @@ export function run(): Promise<void> {
                     const target = (await definition())?.[0];
                     return target?.uri.fsPath.toLowerCase() === replacement.toLowerCase() ? true : undefined;
                 }, 'manifest change must replace the watched dependency');
-                // VS Code 异步安装新目录的系统监听；等其就绪后再产生后续磁盘变化。
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await primeWatcher(replacement);
                 await writeFile(replacement, 'pub fn value() -> string { return "replacement"; }\n');
-                await waitFor(async () => errors().some(item => /Expected int/.test(item.message)) ? true : undefined, 'replacement dependency must be watched');
+                await waitFor(async () => mismatch('string') ? true : undefined, 'replacement dependency must be watched');
             } finally {
                 await vscode.commands.executeCommand('workbench.action.closeAllEditors');
                 if ((vscode.workspace.workspaceFolders?.length ?? 0) > anchorCount) {
-                    vscode.workspace.updateWorkspaceFolders(anchorCount, (vscode.workspace.workspaceFolders?.length ?? 0) - anchorCount);
+                    await updateFolders(anchorCount, (vscode.workspace.workspaceFolders?.length ?? 0) - anchorCount);
                     await waitFor(async () => vscode.workspace.workspaceFolders?.length === anchorCount ? true : undefined, 'consumer workspace must be removed');
                 }
                 await closeAndRemove(root);
