@@ -7,7 +7,7 @@ import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
 import type { ExtensionContext } from 'vscode';
-import { currentManagedToolchainTarget, installManagedToolchain, loadManagedToolchain } from '../src/managedToolchain';
+import { currentManagedToolchainTarget, installManagedToolchain, loadManagedToolchain, updateManagedToolchain } from '../src/managedToolchain';
 import { executableName, toolchainTargets } from '../src/platform';
 import { releaseAssetName } from '../src/toolchainDownloadCore';
 
@@ -40,7 +40,7 @@ async function archive(root: string, name: string, defect?: Defect) {
     const result = spawnSync('tar', ['-czf', packed, '-C', fixture, 'bundle'], { encoding: 'utf8' });
     assert.equal(result.status, 0, result.stderr);
     const bytes = await readFile(packed);
-    return { bytes, release: { tag_name: name, assets: toolchainTargets.map(platform => ({
+    return { bytes, release: { id: parseInt(digest(Buffer.from(name)).slice(0, 8), 16) + 1, tag_name: `toolchain-v${/v(\d+)$/.exec(name)?.[1] ?? 2}.0.0`, assets: toolchainTargets.map(platform => ({
         name: releaseAssetName('teal', platform), browser_download_url: `https://fixture.invalid/${name}`,
         digest: `sha256:${digest(bytes)}`, size: bytes.length,
     })) } };
@@ -61,13 +61,13 @@ test('real installer selects the complete release, preserves runtime and reuses 
         t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
             if (String(input).startsWith('https://api.github.com/')) {
                 metadata++;
-                return Response.json([{ tag_name: 'partial-v2', assets: valid.release.assets.slice(0, 1) }, valid.release]);
+                return Response.json([{ tag_name: 'toolchain-v2.0.0', assets: valid.release.assets.slice(0, 1) }, valid.release]);
             }
             downloads++;
             return new Response(valid.bytes);
         });
         const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
-        assert.equal(installed.release, 'complete-v1');
+        assert.equal(installed.release, 'toolchain-v1.0.0');
         assert.equal(await readFile(path.join(installed.directory, 'runtime/resource.txt'), 'utf8'), 'runtime complete-v1');
         assert.equal(await loadManagedToolchain(ctx), installed.directory);
         assert.deepEqual(await installManagedToolchain(ctx, 'latest', nativeTarget), installed);
@@ -169,7 +169,7 @@ test('real installer preserves the old selection on commit I/O failures and can 
             });
         }
         const recovered = await installManagedToolchain(ctx, 'latest', nativeTarget);
-        assert.equal(recovered.release, 'v2');
+        assert.equal(recovered.release, 'toolchain-v2.0.0');
         assert.equal(await loadManagedToolchain(ctx), recovered.directory);
         assert.equal(await readFile(path.join(installed.directory, 'runtime/resource.txt'), 'utf8'), 'runtime v1');
     } finally { await rm(root, { recursive: true, force: true }); }
@@ -247,7 +247,7 @@ test('rollback cleanup failure preserves the previous installation and a later r
         rmFault.mock.restore();
         const recovered = await installManagedToolchain(ctx, 'latest', nativeTarget);
         assert.equal(await loadManagedToolchain(ctx), recovered.directory);
-        assert.equal(recovered.release, 'v2');
+        assert.equal(recovered.release, 'toolchain-v2.0.0');
     } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -286,13 +286,10 @@ test('concurrent installations cannot roll back a different successful generatio
         let selected = await archive(root, 'v1');
         let concurrent = false;
         let metadataReads = 0;
-        let releaseBarrier!: () => void;
-        const metadataReady = new Promise<void>(resolve => { releaseBarrier = resolve; });
         t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
             if (String(input).startsWith('https://api.github.com/')) {
                 if (concurrent) {
-                    if (++metadataReads === 2) releaseBarrier();
-                    await metadataReady;
+                    metadataReads++;
                 }
                 return Response.json([selected.release]);
             }
@@ -317,6 +314,7 @@ test('concurrent installations cannot roll back a different successful generatio
         ]);
         const successes = results.filter(result => result.status === 'fulfilled');
         assert.equal(successes.length, 1);
+        assert.equal(metadataReads, 2, "the lock serializes metadata and publication across installers");
         assert.equal(await loadManagedToolchain(ctx), successes[0].value.directory);
         assert.equal(await readFile(path.join(previous.directory, 'runtime/resource.txt'), 'utf8'), 'runtime v1');
     } finally { await rm(root, { recursive: true, force: true }); }
@@ -365,5 +363,65 @@ test('temporary cleanup failure after publication cannot undo a successful insta
         const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
         assert.equal(await loadManagedToolchain(ctx), installed.directory);
         assert.deepEqual(await installManagedToolchain(ctx, 'latest', nativeTarget), installed);
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('background updates share throttling, honor pins, migrate provenance and never downgrade', async t => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-auto-install-')));
+    try {
+        let selected = await archive(root, 'v1');
+        let metadata = 0, downloads = 0;
+        t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+            if (String(input).startsWith('https://api.github.com/')) { metadata++; return Response.json(String(input).includes('/tags/') ? selected.release : [selected.release]); }
+            downloads++; return new Response(selected.bytes);
+        });
+        const ctx = context(root);
+        const first = await updateManagedToolchain(ctx, 'latest', nativeTarget);
+        assert.ok(first);
+        assert.equal(first.repository, 'dev-chee/teal-vscode');
+        assert.ok(first.releaseId);
+        assert.deepEqual(await updateManagedToolchain(ctx, 'latest', nativeTarget), first);
+        assert.equal(metadata, 1);
+        selected = await archive(root, 'v2');
+        const next = await updateManagedToolchain(ctx, 'latest', nativeTarget, { force: true });
+        assert.equal(next?.release, 'toolchain-v2.0.0');
+        selected = await archive(root, 'v1');
+        assert.deepEqual(await updateManagedToolchain(ctx, 'latest', nativeTarget, { force: true }), next);
+        assert.equal(downloads, 2);
+        const pinned = await updateManagedToolchain(ctx, 'toolchain-v1.0.0', nativeTarget);
+        assert.equal(pinned?.release, 'toolchain-v1.0.0');
+        const before = metadata;
+        await updateManagedToolchain(ctx, 'toolchain-v1.0.0', nativeTarget);
+        assert.equal(metadata, before);
+        const legacy = { directory: pinned!.directory, release: pinned!.release, target: pinned!.target };
+        await writeFile(statePath(ctx), JSON.stringify(legacy));
+        assert.equal(await loadManagedToolchain(ctx), legacy.directory);
+        const migrated = await updateManagedToolchain(ctx, 'toolchain-v1.0.0', nativeTarget);
+        assert.notEqual(migrated?.directory, legacy.directory);
+        assert.equal(migrated?.repository, 'dev-chee/teal-vscode');
+        const saved = await readFile(statePath(ctx), 'utf8');
+        await assert.rejects(updateManagedToolchain(ctx, 'latest', nativeTarget, { force: true, canCommit: async () => false }), /cancelled/);
+        assert.equal(await readFile(statePath(ctx), 'utf8'), saved);
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('configuration changes during a real download cancel publication and preserve the old toolchain', async t => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-update-cancel-')));
+    try {
+        let selected = await archive(root, 'v1');
+        let allowed = true, cancelDownload = false;
+        t.mock.method(globalThis, 'fetch', async (input: string | URL | Request, options?: RequestInit) => {
+            assert.ok(options?.signal, 'metadata and downloads have cancellation and time limits');
+            if (String(input).startsWith('https://api.github.com/')) return Response.json([selected.release]);
+            if (cancelDownload) allowed = false;
+            return new Response(selected.bytes);
+        });
+        const ctx = context(root);
+        const first = await installManagedToolchain(ctx, 'latest', nativeTarget);
+        const before = await readFile(statePath(ctx), 'utf8');
+        selected = await archive(root, 'v2'); cancelDownload = true;
+        await assert.rejects(installManagedToolchain(ctx, 'latest', nativeTarget, undefined, { canCommit: async () => allowed }), /cancelled/);
+        assert.equal(await readFile(statePath(ctx), 'utf8'), before);
+        assert.equal(await loadManagedToolchain(ctx), first.directory);
     } finally { await rm(root, { recursive: true, force: true }); }
 });

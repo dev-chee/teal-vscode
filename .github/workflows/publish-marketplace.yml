@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       toolchain_release:
-        description: Complete stable toolchain Release in dev-chee/teal
+        description: Complete stable toolchain Release in dev-chee/teal-vscode
         type: string
         default: latest
       publish:
@@ -89,6 +89,14 @@ jobs:
         env:
           TEAL_TEST_GREP: cold-starts|recognizes generated|debug configurations|resolves tier|serves concrete LSP|integrated-terminal|runs a Teal file|attaches to
         run: xvfb-run --auto-servernum pnpm test
+
+      - name: Managed updates and live LSP in VS Code
+        if: matrix.extensionHost
+        shell: bash
+        env:
+          TEAL_TEST_SUITE: toolchainUpdate.host.js
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then xvfb-run --auto-servernum pnpm test; else pnpm test; fi
 
       - uses: docker/setup-qemu-action@v3
         if: matrix.target == 'linux-armhf'

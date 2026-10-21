@@ -10,12 +10,16 @@ import { currentToolchainTarget } from './hostPlatform';
 import { parseSha256Digest, readToolchainRelease, releaseAssetName, validateArchiveListing, validateAssetUrl, verifySha256, type ReleaseAsset } from './toolchainDownloadCore';
 import { inspectToolchain, isCompleteToolchain, toolNames } from './toolchain';
 import { verifyToolchainDistribution } from './toolchainDistributionCore.cjs';
+import { compareToolchainVersions } from './toolchainReleaseCore.cjs';
+import distribution from './toolchain-targets.json';
+import { withManagedLock } from './managedLock';
 
 const managedDirectoryName = 'managed-toolchain';
 const maxAssetBytes = 512 * 1024 * 1024;
 const execFileAsync = promisify(execFile);
 
 interface ReleaseInfo {
+    id: number;
     tag_name: string;
     assets: ReleaseAsset[];
     draft?: boolean;
@@ -28,15 +32,18 @@ function managedRoot(context: vscode.ExtensionContext): string {
     return path.join(context.globalStorageUri.fsPath, managedDirectoryName);
 }
 
-async function fetchRelease(release: string): Promise<ReleaseInfo> {
-    return await readToolchainRelease(release) as ReleaseInfo;
+async function fetchRelease(release: string, signal?: AbortSignal): Promise<ReleaseInfo> {
+    const info = await readToolchainRelease(release, undefined, globalThis.fetch, signal) as ReleaseInfo;
+    if (!Number.isSafeInteger(info.id) || info.id <= 0) throw new Error('Invalid toolchain Release ID.');
+    return info;
 }
 
-async function downloadAsset(asset: ReleaseAsset): Promise<Uint8Array> {
+async function downloadAsset(asset: ReleaseAsset, signal?: AbortSignal): Promise<Uint8Array> {
     validateAssetUrl(asset.browser_download_url);
     if (asset.size !== undefined && asset.size > maxAssetBytes) throw new Error(`The Teal toolchain asset ${asset.name} is too large.`);
     const response = await fetch(asset.browser_download_url, {
         headers: { Accept: 'application/octet-stream', 'User-Agent': 'teal-vscode-extension' },
+        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000),
     });
     if (!response.ok) throw new Error(`Unable to download ${asset.name} (${response.status} ${response.statusText}).`);
     const bytes = new Uint8Array(await response.arrayBuffer());
@@ -77,7 +84,7 @@ async function readManagedState(context: vscode.ExtensionContext): Promise<Manag
         const toolchain = await inspectToolchain(value.directory);
         if (!isCompleteToolchain(toolchain)) return undefined;
         await verifyToolchainDistribution(toolchain.directory, value.target);
-        return { directory: toolchain.directory, release: value.release, target: value.target };
+        return { ...value, directory: toolchain.directory };
     } catch {
         return undefined;
     }
@@ -92,13 +99,71 @@ export async function installManagedToolchain(
     release: string,
     target: ManagedToolchainTarget,
     report?: (message: string) => void,
-): Promise<{ directory: string; release: string; target: ManagedToolchainTarget }> {
-    const root = managedRoot(context);
-    const existing = await readManagedState(context);
+    options: InstallOptions = {},
+): Promise<ManagedState> {
+    return withManagedLock(managedRoot(context), signal => installLocked(context, release, target, report, { ...options, signal }), options.signal);
+}
 
+export interface InstallOptions {
+    signal?: AbortSignal;
+    /** 配置、信任或扩展生命周期发生变化时，提交前取消候选安装。 */
+    canCommit?: () => Promise<boolean>;
+}
+
+async function checkCommit(options: InstallOptions): Promise<void> {
+    options.signal?.throwIfAborted();
+    if (options.canCommit && !await options.canCommit()) throw new Error('Toolchain update cancelled because configuration or workspace trust changed.');
+    options.signal?.throwIfAborted();
+}
+
+/** 检查时间和安装事务共用锁，避免其他窗口重复下载或以旧结果覆盖新版本。 */
+export async function updateManagedToolchain(
+    context: vscode.ExtensionContext, release: string, target: ManagedToolchainTarget,
+    options: InstallOptions & { force?: boolean; intervalMs?: number } = {},
+): Promise<ManagedState | undefined> {
+    const root = managedRoot(context);
+    return withManagedLock(root, async signal => {
+        const settings = { ...options, signal };
+        await checkCommit(settings);
+        const existing = await readManagedState(context);
+        const identity = (state: ManagedState | undefined) => state ? `${state.directory}|${state.repository ?? ''}|${state.releaseId ?? ''}` : '';
+        const latest = (release.trim() || 'latest').toLowerCase() === 'latest';
+        if (!options.force) {
+            if (!latest && existing?.release === release && existing.repository === distribution.repository && existing.releaseId) return existing;
+            const stamp = await readFile(path.join(root, 'last-check.json'), 'utf8').then(value => JSON.parse(value)).catch(() => undefined);
+            if (stamp?.repository === distribution.repository && stamp.release === release && stamp.target === target
+                && typeof stamp.time === 'number' && Date.now() >= stamp.time && Date.now() - stamp.time < (options.intervalMs ?? 6 * 60 * 60_000)
+                && stamp.installation === identity(existing)) return existing;
+        }
+        const time = Date.now();
+        const record = async (state: ManagedState | undefined) => {
+            const temporary = path.join(root, `.check-${randomUUID()}`);
+            try {
+                await writeFile(temporary, JSON.stringify({ repository: distribution.repository, release, target, time, installation: identity(state) }));
+                await rename(temporary, path.join(root, 'last-check.json'));
+            } finally { await rm(temporary, { force: true }); }
+        };
+        await record(existing);
+        const installed = await installLocked(context, release, target, undefined, settings);
+        // 安装已提交；节流记录清理失败不能把成功的安装报告为失败。
+        await record(installed).catch(() => {});
+        return installed;
+    }, options.signal);
+}
+
+async function installLocked(
+    context: vscode.ExtensionContext, release: string, target: ManagedToolchainTarget,
+    report: ((message: string) => void) | undefined, options: InstallOptions,
+): Promise<ManagedState> {
+    const root = managedRoot(context);
+    await checkCommit(options);
     report?.('Reading the Teal toolchain release metadata…');
-    const releaseInfo = await fetchRelease(release);
-    if (existing && existing.target === target && existing.release === releaseInfo.tag_name) return existing;
+    const releaseInfo = await fetchRelease(release, options.signal);
+    const existing = await readManagedState(context);
+    await checkCommit(options);
+    const latest = (release.trim() || 'latest').toLowerCase() === 'latest';
+    if (existing && existing.target === target && (latest && compareToolchainVersions(existing.release, releaseInfo.tag_name) === 1
+        || existing.release === releaseInfo.tag_name && existing.repository === distribution.repository && existing.releaseId === releaseInfo.id)) return existing;
     const archiveName = releaseAssetName('teal', target);
     const archive = releaseInfo.assets.find((asset) => asset.name === archiveName);
     if (!archive) throw new Error(`The release ${releaseInfo.tag_name} does not contain ${archiveName}.`);
@@ -107,14 +172,14 @@ export async function installManagedToolchain(
     const staging = path.join(root, `.staging-${installationId}`);
     // 每次安装独立成代，避免修复同标签时删除仍被其他窗口或进程使用的目录。
     const finalDirectory = path.join(root, 'installations', `${target}-${installationId}`);
-    const state: ManagedState = { directory: finalDirectory, release: releaseInfo.tag_name, target };
+    const state: ManagedState = { directory: finalDirectory, release: releaseInfo.tag_name, target, repository: distribution.repository, releaseId: releaseInfo.id };
     let publicationAttempted = false;
     let committed = false;
     try {
         await mkdir(staging, { recursive: true });
         const archivePath = path.join(staging, archive.name);
         report?.(`Downloading ${archive.name}…`);
-        await writeFile(archivePath, await downloadAsset(archive));
+        await writeFile(archivePath, await downloadAsset(archive, options.signal));
         const extracted = path.join(staging, 'contents');
         await mkdir(extracted, { recursive: true });
         await extractArchive(archivePath, extracted);
@@ -122,6 +187,7 @@ export async function installManagedToolchain(
         if (!toolchainRoot) throw new Error(`The downloaded release did not contain a complete Teal toolchain (${toolNames.join(', ')}).`);
         // 完成与 CI 相同的分发校验后，才允许替换目录和发布 current.json。
         await verifyToolchainDistribution(toolchainRoot, target);
+        await checkCommit(options);
         await mkdir(path.dirname(finalDirectory), { recursive: true });
         await rename(toolchainRoot, finalDirectory);
         const temporaryState = path.join(staging, 'selection.json');
@@ -135,6 +201,7 @@ export async function installManagedToolchain(
             throw error;
         }
         await file.close();
+        await checkCommit(options);
         publicationAttempted = true;
         try {
             await rename(temporaryState, path.join(root, 'current.json'));

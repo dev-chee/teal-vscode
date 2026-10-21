@@ -7,6 +7,11 @@ export function isSupported(): boolean {
 }
 
 let managedToolchainDirectory: string | undefined;
+let prepareToolchain: (() => Promise<void>) | undefined;
+
+export function setToolchainPreparation(prepare: (() => Promise<void>) | undefined): void {
+    prepareToolchain = prepare;
+}
 
 export function setManagedToolchainDirectory(directory: string | undefined): void {
     managedToolchainDirectory = directory;
@@ -18,6 +23,8 @@ export function requireExecution(): void {
 }
 
 export async function executable(name: ToolName, resource?: vscode.Uri): Promise<string> {
+    requireExecution();
+    if (!managedToolchainDirectory) await prepareToolchain?.();
     requireExecution();
     const configured = vscode.workspace.getConfiguration('teal', resource).get<string>('toolchain.path', '');
     const toolchain = await resolveToolchainWithManaged(configured, managedToolchainDirectory);

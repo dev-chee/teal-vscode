@@ -1,5 +1,5 @@
 {
-  "repository": "dev-chee/teal",
+  "repository": "dev-chee/teal-vscode",
   "targets": {
     "win32-x64": {
       "rustTarget": "x86_64-pc-windows-msvc",

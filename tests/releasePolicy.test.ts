@@ -5,8 +5,8 @@ import distribution from '../src/toolchain-targets.json';
 import { selectToolchainRelease } from '../src/toolchainDownloadCore';
 
 const policy = createReleasePolicy(distribution);
-const complete = { tag_name: 'complete-v2', assets: policy.targets.map(target => ({ name: policy.archiveName(target) })) };
-const partial = { tag_name: 'partial-v3', assets: [{ name: policy.archiveName('linux-x64') }] };
+const complete = { tag_name: 'toolchain-v2.0.0', assets: policy.targets.map(target => ({ name: policy.archiveName(target) })) };
+const partial = { tag_name: 'toolchain-v3.0.0', assets: [{ name: policy.archiveName('linux-x64') }] };
 
 test('installer and CI use the same complete stable Release rule and pagination', async () => {
     assert.equal(selectToolchainRelease([partial, complete]), complete);
@@ -25,7 +25,16 @@ test('installer and CI use the same complete stable Release rule and pagination'
 
 test('pinned incomplete, draft and prerelease toolchains fail instead of bypassing the gate', async () => {
     for (const release of [partial, { ...complete, draft: true }, { ...complete, prerelease: true }]) {
-        await assert.rejects(policy.readRelease('fixed', undefined, async () => Response.json(release)), /all 9 desktop archives/);
+        await assert.rejects(policy.readRelease(complete.tag_name, undefined, async () => Response.json(release)), /all 9 desktop archives/);
     }
     assert.equal(policy.selectRelease([null, {}, partial, complete]), complete);
+});
+
+test('latest compares semantic versions across all pages and ignores unrelated releases', async () => {
+    const newer = { ...complete, tag_name: 'toolchain-v10.0.0' };
+    const older = { ...complete, tag_name: 'toolchain-v9.9.9' };
+    const unrelated = { ...complete, tag_name: 'v99.0.0' };
+    const selected = await policy.readRelease('latest', undefined, async url => Response.json(String(url).endsWith('page=1')
+        ? [older, unrelated, ...Array(98).fill(partial)] : [newer]));
+    assert.equal(selected.tag_name, newer.tag_name);
 });

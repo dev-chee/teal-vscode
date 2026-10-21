@@ -18,8 +18,10 @@ writeFileSync(workspace, JSON.stringify({ folders: [{ path: '.' }] }));
 
 await runTests({
   vscodeExecutablePath: process.env.VSCODE_EXECUTABLE_PATH,
+  cachePath: process.env.TEAL_VSCODE_TEST_CACHE,
   extensionDevelopmentPath: process.env.TEAL_TEST_EXTENSION_PATH ?? projectRoot,
-  extensionTestsPath: path.join(projectRoot, 'out-test', 'tests', 'extensionHost.test.js'),
+  extensionTestsPath: path.join(projectRoot, 'out-test', 'tests', process.env.TEAL_TEST_SUITE ?? 'extensionHost.test.js'),
+  extensionTestsEnv: { TEAL_TEST_STORAGE_DIR: path.join(profile, 'User', 'globalStorage', 'dev-chee.teal-vscode') },
   launchArgs: [
     '--disable-extensions',
     workspace,

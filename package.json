@@ -2,7 +2,7 @@
   "name": "teal-vscode",
   "displayName": "Teal Language for VS Code",
   "description": "Teal 语言支持：本地语言服务器、运行和源码调试。",
-  "version": "0.1.7",
+  "version": "0.1.8",
   "publisher": "dev-chee",
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
@@ -41,6 +41,7 @@
       "restrictedConfigurations": [
         "teal.toolchain.path",
         "teal.toolchain.release",
+        "teal.toolchain.autoUpdate",
         "teal.run.options",
         "teal.run.args",
         "teal.lsp.entryFiles"
@@ -140,6 +141,13 @@
         "enablement": "isWorkspaceTrusted && teal.supported"
       },
       {
+        "command": "teal.checkToolchainUpdates",
+        "title": "检查并更新 Teal 工具链",
+        "category": "Teal",
+        "icon": "$(sync)",
+        "enablement": "isWorkspaceTrusted && teal.supported"
+      },
+      {
         "command": "teal.debugFile",
         "title": "调试当前文件",
         "category": "Teal",
@@ -174,7 +182,13 @@
           "type": "string",
           "default": "latest",
           "scope": "machine-overridable",
-          "description": "托管工具链的 Teal GitHub Release 标签；latest 使用最新发布版本。显式 teal.toolchain.path 始终优先。"
+          "description": "dev-chee/teal-vscode 的工具链 Release 标签；latest 使用版本号最高的完整正式版本，固定标签不追踪新版本。显式路径和完整 PATH 工具链优先。"
+        },
+        "teal.toolchain.autoUpdate": {
+          "type": "boolean",
+          "default": true,
+          "scope": "machine-overridable",
+          "description": "自动安装和更新托管工具链；激活时及每 6 小时检查。仅在受信任工作区运行，保留显式路径和完整 PATH 的优先级。"
         },
         "teal.lsp.entryFiles": {
           "type": "array",
@@ -390,12 +404,14 @@
     "verify:toolchain": "node scripts/verify-toolchain.mjs"
   },
   "dependencies": {
+    "proper-lockfile": "4.1.2",
     "vscode-languageclient": "9.0.1"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.0",
     "@types/mocha": "^10.0.0",
     "@types/node": "^20.0.0",
+    "@types/proper-lockfile": "4.1.4",
     "@types/vscode": "1.91.0",
     "@vscode/test-electron": "^2.5.2",
     "@vscode/vsce": "^3.6.0",

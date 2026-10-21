@@ -29,7 +29,15 @@ git push origin v0.1.1
 
 Marketplace 发布以下全部桌面目标：`win32-x64`、`win32-arm64`、`linux-x64`、`linux-arm64`、`linux-armhf`、`alpine-x64`、`alpine-arm64`、`darwin-x64`、`darwin-arm64`。当前不发布 `web`，因为原生执行依赖 Node.js 工作区宿主、子进程和 DAP。
 
-扩展不包含 Teal 工具链，用户按 README 配置本地工具链或执行托管安装。工具链统一发布在 `dev-chee/teal`，需要先提交并运行 Teal 源码仓库的 `Release Teal toolchain` 工作流。填写唯一 `release_tag` 和 `source_ref`，工作流将源码解析为固定 SHA，全部 9 个目标构建和协议验收成功后才创建 Release。
+扩展不包含 Teal 工具链。源码仓库 `dev-chee/teal` 负责构建，公共二进制统一发布到本仓库 `dev-chee/teal-vscode` Releases。
+
+在源码仓库的 **Settings → Secrets and variables → Actions** 配置 `TEAL_VSCODE_RELEASE_TOKEN`。令牌采用细粒度 PAT，仅选择目标仓库 `dev-chee/teal-vscode`，授予 `Contents: Read and write`；令牌只传给最后的发布步骤，不传给构建或测试步骤。源码检出使用其自己的 `GITHUB_TOKEN`。
+
+推送稳定版本标签 `toolchain-vX.Y.Z`（例如 `toolchain-v0.1.5`），源码工作流解析标签为固定 SHA，全部 9 平台构建和协议验收成功后才上传。手动运行 `Release Teal toolchain` 时只需填写已存在的 `release_tag`，用于重试该版本。
+
+目标 Release 先以草稿创建，标签指向目标仓库默认分支提交；发布说明和 `toolchain-release.json` 记录源码仓库、标签、SHA 和构建链接。各归档带 `.sha256` 及目标来源 JSON。上传完成后重新核对所有平台和 GitHub 资产摘要，再公开草稿。同源码草稿可以重传；同源码完整正式版本可安全重试；不同源码占用同一标签时拒绝覆盖。
+
+首次上线顺序：先配置源码仓库 Secret，再发布一个完整 9 平台工具链版本，最后通过现有 `v*` 标签流程发布包含自动更新器的插件版本。后续二进制更新沿用 `toolchain-v*`，不要求同步升级插件版本。历史不完整 Release 不会被选为 `latest`。
 
 扩展发布会选择同一个包含全部 9 个归档的正式工具链 Release，校验 SHA-256 和 runtime 资源，再运行各平台协议测试与六个平台的 VS Code 宿主测试。缺少任意目标会阻止发布；不会混合历史版本填补缺失目标。
 
