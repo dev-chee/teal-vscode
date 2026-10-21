@@ -98,6 +98,14 @@ jobs:
         run: |
           if [[ "$RUNNER_OS" == Linux ]]; then xvfb-run --auto-servernum pnpm test; else pnpm test; fi
 
+      - name: Folder-specific toolchains in VS Code
+        if: matrix.extensionHost
+        shell: bash
+        env:
+          TEAL_TEST_SUITE: toolchainFolders.host.js
+        run: |
+          if [[ "$RUNNER_OS" == Linux ]]; then xvfb-run --auto-servernum pnpm test; else pnpm test; fi
+
       - uses: docker/setup-qemu-action@v3
         if: matrix.target == 'linux-armhf'
         with:

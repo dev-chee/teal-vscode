@@ -1,20 +1,15 @@
 import * as vscode from 'vscode';
-import { resolveToolchainWithManaged, type ToolName } from './toolchain';
+import { isCompleteToolchain, resolveToolchain, resolveToolchainWithManaged, type ToolName } from './toolchain';
 import { executableName, supportsExecution } from './platform';
 
 export function isSupported(): boolean {
     return supportsExecution(process.platform, process.arch);
 }
 
-let managedToolchainDirectory: string | undefined;
-let prepareToolchain: (() => Promise<void>) | undefined;
+let managedToolchain: ((resource?: vscode.Uri) => Promise<string | undefined>) | undefined;
 
-export function setToolchainPreparation(prepare: (() => Promise<void>) | undefined): void {
-    prepareToolchain = prepare;
-}
-
-export function setManagedToolchainDirectory(directory: string | undefined): void {
-    managedToolchainDirectory = directory;
+export function setManagedToolchainProvider(provider: typeof managedToolchain): void {
+    managedToolchain = provider;
 }
 
 export function requireExecution(): void {
@@ -24,10 +19,20 @@ export function requireExecution(): void {
 
 export async function executable(name: ToolName, resource?: vscode.Uri): Promise<string> {
     requireExecution();
-    if (!managedToolchainDirectory) await prepareToolchain?.();
-    requireExecution();
     const configured = vscode.workspace.getConfiguration('teal', resource).get<string>('toolchain.path', '');
-    const toolchain = await resolveToolchainWithManaged(configured, managedToolchainDirectory);
+    let toolchain = await resolveToolchain(configured).catch(error => {
+        if (configured.trim()) throw error;
+        return undefined;
+    });
+    // 本地工具不等待其他文件夹的下载，显式错误仍直接报告。
+    if (!configured.trim() && !isCompleteToolchain(toolchain)) {
+        const directory = await managedToolchain?.(resource);
+        requireExecution();
+        const current = vscode.workspace.getConfiguration('teal', resource).get<string>('toolchain.path', '');
+        toolchain = await resolveToolchainWithManaged(current, directory);
+    }
+    requireExecution();
+    if (!toolchain) throw new Error('No Teal toolchain found.');
     const result = toolchain.tools[name];
     if (!result) throw new Error(`${executableName(name)} is missing from ${toolchain.directory}. Configure a toolchain containing this tool.`);
     return result;

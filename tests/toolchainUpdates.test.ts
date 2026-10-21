@@ -18,7 +18,7 @@ function fixture() {
 test('initial installation becomes ready before language clients refresh', async () => {
     const f = fixture();
     const updates = new ToolchainUpdates(f.host);
-    f.host.apply = async directory => { await updates.ready(); f.applied.push(directory); };
+    f.host.apply = async (directory, release) => { assert.equal(release, 'latest'); await updates.ready(); f.applied.push(directory); };
     assert.equal(await updates.check(), 'installed');
     assert.deepEqual(f.calls, [{ release: 'latest', force: false }]);
     assert.deepEqual(f.applied, ['installed']);

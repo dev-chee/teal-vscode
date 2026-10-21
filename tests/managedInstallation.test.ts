@@ -70,6 +70,8 @@ test('real installer selects the complete release, preserves runtime and reuses 
         assert.equal(installed.release, 'toolchain-v1.0.0');
         assert.equal(await readFile(path.join(installed.directory, 'runtime/resource.txt'), 'utf8'), 'runtime complete-v1');
         assert.equal(await loadManagedToolchain(ctx), installed.directory);
+        assert.equal(await loadManagedToolchain(ctx, 'toolchain-v1.0.0'), installed.directory);
+        assert.equal(await loadManagedToolchain(ctx, 'toolchain-v2.0.0'), undefined, 'a legacy selection cannot satisfy another folder pin');
         assert.deepEqual(await installManagedToolchain(ctx, 'latest', nativeTarget), installed);
         assert.equal(metadata, 2, 'latest must be resolved before reusing a cache');
         assert.equal(downloads, 1);
@@ -423,5 +425,61 @@ test('configuration changes during a real download cancel publication and preser
         await assert.rejects(installManagedToolchain(ctx, 'latest', nativeTarget, undefined, { canCommit: async () => allowed }), /cancelled/);
         assert.equal(await readFile(statePath(ctx), 'utf8'), before);
         assert.equal(await loadManagedToolchain(ctx), first.directory);
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('initial background installation retries failures and cancellation without force', async t => {
+    for (const failure of ['metadata', 'download', 'configuration', 'signal'] as const) {
+        await t.test(failure, async t => {
+            const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-initial-retry-')));
+            try {
+                const valid = await archive(root, 'v1');
+                const ctx = context(root);
+                const controller = new AbortController();
+                let failing = true, allowed = true, metadata = 0;
+                t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => {
+                    if (String(input).startsWith('https://api.github.com/')) {
+                        metadata++;
+                        if (failing && failure === 'metadata') throw new Error('temporary metadata failure');
+                        return Response.json([valid.release]);
+                    }
+                    if (failing && failure === 'download') throw new Error('temporary download failure');
+                    if (failing && failure === 'configuration') allowed = false;
+                    if (failing && failure === 'signal') controller.abort();
+                    return new Response(valid.bytes);
+                });
+                await assert.rejects(updateManagedToolchain(ctx, 'latest', nativeTarget, {
+                    signal: controller.signal, canCommit: async () => allowed,
+                }));
+                assert.equal(await loadManagedToolchain(ctx), undefined);
+                failing = false; allowed = true;
+                const installed = await updateManagedToolchain(ctx, 'latest', nativeTarget);
+                assert.equal(installed?.release, valid.release.tag_name);
+                assert.equal(metadata, 2);
+                assert.deepEqual(await updateManagedToolchain(ctx, 'latest', nativeTarget), installed);
+                assert.equal(metadata, 2, 'a successful retry must retain shared throttling');
+            } finally { await rm(root, { recursive: true, force: true }); }
+        });
+    }
+});
+
+test('an old failed-attempt stamp cannot throttle an absent or corrupt installation', async t => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-empty-check-')));
+    try {
+        const valid = await archive(root, 'v1');
+        const ctx = context(root);
+        t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => String(input).startsWith('https://api.github.com/')
+            ? Response.json([valid.release]) : new Response(valid.bytes));
+        const managed = path.dirname(statePath(ctx));
+        await mkdir(managed, { recursive: true });
+        const stamp = { repository: 'dev-chee/teal-vscode', release: 'latest', target: nativeTarget, time: Date.now(), installation: '' };
+        await writeFile(path.join(managed, 'last-check.json'), JSON.stringify(stamp));
+        const first = await updateManagedToolchain(ctx, 'latest', nativeTarget);
+        assert.ok(first);
+        await writeFile(path.join(first.directory, executableName('teal')), '');
+        await writeFile(path.join(managed, 'last-check.json'), JSON.stringify(stamp));
+        const repaired = await updateManagedToolchain(ctx, 'latest', nativeTarget);
+        assert.ok(repaired);
+        assert.notEqual(repaired.directory, first.directory);
     } finally { await rm(root, { recursive: true, force: true }); }
 });

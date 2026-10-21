@@ -9,7 +9,7 @@ export interface UpdateSettings {
 export interface UpdateHost {
     settings(): Promise<UpdateSettings>;
     install(release: string, options: { force: boolean; signal: AbortSignal; canCommit: () => Promise<boolean> }): Promise<string | undefined>;
-    apply(directory: string): Promise<void>;
+    apply(directory: string, release: string): Promise<void>;
     log(error: unknown): void;
 }
 
@@ -49,14 +49,14 @@ export class ToolchainUpdates {
                 const current = await this.host.settings();
                 return !this.stopped && !controller.signal.aborted && eligible(current) && current.release === initial.release;
             };
-            return this.host.install(initial.release, { force, signal: controller.signal, canCommit });
+            return { directory: await this.host.install(initial.release, { force, signal: controller.signal, canCommit }), release: initial.release };
         })();
         this.preparation = preparation;
         // 无消费者等待 ready 时也需要处理后台拒绝。
         void preparation.catch(() => {});
-        const operation = preparation.then(async directory => {
-            if (directory && !this.stopped && !controller.signal.aborted) await this.host.apply(directory);
-            return directory;
+        const operation = preparation.then(async prepared => {
+            if (prepared?.directory && !this.stopped && !controller.signal.aborted) await this.host.apply(prepared.directory, prepared.release);
+            return prepared?.directory;
         }).finally(() => { if (this.operation === operation) this.operation = undefined; });
         this.operation = operation;
         return operation;

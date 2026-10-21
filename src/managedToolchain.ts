@@ -17,6 +17,7 @@ import { withManagedLock } from './managedLock';
 const managedDirectoryName = 'managed-toolchain';
 const maxAssetBytes = 512 * 1024 * 1024;
 const execFileAsync = promisify(execFile);
+export type ManagedToolchainStorage = Pick<vscode.ExtensionContext, 'globalStorageUri'>;
 
 interface ReleaseInfo {
     id: number;
@@ -28,7 +29,7 @@ interface ReleaseInfo {
 
 export { parseSha256Digest, releaseApiUrl, releaseAssetName, validateAssetUrl, verifySha256 } from './toolchainDownloadCore';
 
-function managedRoot(context: vscode.ExtensionContext): string {
+function managedRoot(context: ManagedToolchainStorage): string {
     return path.join(context.globalStorageUri.fsPath, managedDirectoryName);
 }
 
@@ -77,7 +78,7 @@ async function findToolchainRoot(root: string): Promise<string | undefined> {
     return undefined;
 }
 
-async function readManagedState(context: vscode.ExtensionContext): Promise<ManagedState | undefined> {
+async function readManagedState(context: ManagedToolchainStorage): Promise<ManagedState | undefined> {
     try {
         const value = parseManagedState(JSON.parse(await readFile(path.join(managedRoot(context), 'current.json'), 'utf8')), currentToolchainTarget());
         if (!value) return undefined;
@@ -90,12 +91,13 @@ async function readManagedState(context: vscode.ExtensionContext): Promise<Manag
     }
 }
 
-export async function loadManagedToolchain(context: vscode.ExtensionContext): Promise<string | undefined> {
-    return (await readManagedState(context))?.directory;
+export async function loadManagedToolchain(context: ManagedToolchainStorage, release?: string): Promise<string | undefined> {
+    const state = await readManagedState(context);
+    return state && (!release || release === 'latest' || state.release === release) ? state.directory : undefined;
 }
 
 export async function installManagedToolchain(
-    context: vscode.ExtensionContext,
+    context: ManagedToolchainStorage,
     release: string,
     target: ManagedToolchainTarget,
     report?: (message: string) => void,
@@ -118,7 +120,7 @@ async function checkCommit(options: InstallOptions): Promise<void> {
 
 /** 检查时间和安装事务共用锁，避免其他窗口重复下载或以旧结果覆盖新版本。 */
 export async function updateManagedToolchain(
-    context: vscode.ExtensionContext, release: string, target: ManagedToolchainTarget,
+    context: ManagedToolchainStorage, release: string, target: ManagedToolchainTarget,
     options: InstallOptions & { force?: boolean; intervalMs?: number } = {},
 ): Promise<ManagedState | undefined> {
     const root = managedRoot(context);
@@ -131,19 +133,18 @@ export async function updateManagedToolchain(
         if (!options.force) {
             if (!latest && existing?.release === release && existing.repository === distribution.repository && existing.releaseId) return existing;
             const stamp = await readFile(path.join(root, 'last-check.json'), 'utf8').then(value => JSON.parse(value)).catch(() => undefined);
-            if (stamp?.repository === distribution.repository && stamp.release === release && stamp.target === target
+            if (existing && stamp?.repository === distribution.repository && stamp.release === release && stamp.target === target
                 && typeof stamp.time === 'number' && Date.now() >= stamp.time && Date.now() - stamp.time < (options.intervalMs ?? 6 * 60 * 60_000)
                 && stamp.installation === identity(existing)) return existing;
         }
         const time = Date.now();
-        const record = async (state: ManagedState | undefined) => {
+        const record = async (state: ManagedState) => {
             const temporary = path.join(root, `.check-${randomUUID()}`);
             try {
                 await writeFile(temporary, JSON.stringify({ repository: distribution.repository, release, target, time, installation: identity(state) }));
                 await rename(temporary, path.join(root, 'last-check.json'));
             } finally { await rm(temporary, { force: true }); }
         };
-        await record(existing);
         const installed = await installLocked(context, release, target, undefined, settings);
         // 安装已提交；节流记录清理失败不能把成功的安装报告为失败。
         await record(installed).catch(() => {});
@@ -152,7 +153,7 @@ export async function updateManagedToolchain(
 }
 
 async function installLocked(
-    context: vscode.ExtensionContext, release: string, target: ManagedToolchainTarget,
+    context: ManagedToolchainStorage, release: string, target: ManagedToolchainTarget,
     report: ((message: string) => void) | undefined, options: InstallOptions,
 ): Promise<ManagedState> {
     const root = managedRoot(context);
