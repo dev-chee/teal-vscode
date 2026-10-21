@@ -69,6 +69,31 @@ test('declaration names, receiver, wildcard and namespace paths have dedicated s
     }
 });
 
+test('use imports highlight every module segment and namespace alias', () => {
+    for (const source of [
+        'use std::json;',
+        'use std :: json as data;',
+        'use std // module comment\n :: json as data;',
+        'use package::nested::json as data;',
+        'use super::json;',
+        'use std::agent as data;',
+    ]) {
+        expectScope(source, 'use', 'storage.type.teal');
+        for (const word of source.replace(/\/\/[^\n]*/g, '').match(/[A-Za-z_][A-Za-z0-9_]*/g)!) {
+            if (word === 'use' || word === 'as') continue;
+            expectScope(source, word, 'entity.name.namespace.teal');
+        }
+    }
+    expectScope('use std::json; fn main() { let value = 1; }', 'main', 'entity.name.function.teal');
+    expectScope('use std::json\nfn main() {}', 'main', 'entity.name.function.teal');
+    expectScope('use std::json as data;', 'as', 'storage.type.teal');
+    assert.deepEqual(scopesAt(grammar, 'use std::json; let ordinary = 1;', 'ordinary'), ['source.teal']);
+    assert.deepEqual(scopesAt(grammar, 'let use_json = 1;', 'use_json'), ['source.teal']);
+    for (const source of ['// use std::json;', '"use std::json;"']) {
+        assert.ok(!scopesAt(grammar, source, 'json').includes('entity.name.namespace.teal'));
+    }
+});
+
 test('interpolation highlights qualified variable and field paths while preserving literal escapes', () => {
     const source = String.raw`let message = "{{literal}} \{escaped} {user.name} {module::item.field} {self.value}\n";`;
     expectScope(source, 'literal', 'string.quoted.double.teal');

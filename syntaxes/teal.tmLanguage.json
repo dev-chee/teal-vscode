@@ -14,10 +14,11 @@
       ] }
     ] },
     { "include": "#attributes" },
+    { "include": "#imports" },
     { "include": "#declarations" },
     { "name": "entity.name.label.teal", "match": "'[A-Za-z_][A-Za-z0-9_]*" },
     { "name": "keyword.control.teal", "match": "\\b(?:if|else|match|for|in|try|catch|return|break|continue|loop|await)\\b" },
-    { "name": "storage.type.teal", "match": "\\b(?:dylib|host|import|pub|impl|trait|as|fn|class|enum|let|static|const|reflect|struct|type|agent|task)\\b" },
+    { "name": "storage.type.teal", "match": "\\b(?:dylib|host|import|use|pub|impl|trait|as|fn|class|enum|let|static|const|reflect|struct|type|agent|task)\\b" },
     { "name": "support.type.teal", "match": "\\b(?:int|float|bool|string|Task|Error)\\b" },
     { "name": "constant.language.teal", "match": "\\b(?:none|true|false|_)\\b" },
     { "include": "#receiver" },
@@ -31,6 +32,18 @@
     "attributes": {
       "name": "entity.other.attribute-name.teal",
       "match": "@[ \\t]*[A-Za-z_][A-Za-z0-9_]*(?:[ \\t]*::[ \\t]*[A-Za-z_][A-Za-z0-9_]*)*"
+    },
+    "imports": {
+      "begin": "\\b(use)\\b",
+      "beginCaptures": { "1": { "name": "storage.type.teal" } },
+      "end": ";|(?=[{}])|(?=\\b(?:fn|task|class|struct|enum|trait|type|let|const|static|pub|use|impl|host|dylib)\\b)",
+      "endCaptures": { "0": { "name": "punctuation.section.teal" } },
+      "patterns": [
+        { "name": "comment.line.double-slash.teal", "begin": "//", "end": "$" },
+        { "name": "storage.type.teal", "match": "\\bas\\b" },
+        { "name": "entity.name.namespace.teal", "match": "\\b[A-Za-z_][A-Za-z0-9_]*\\b" },
+        { "name": "punctuation.accessor.teal", "match": "::" }
+      ]
     },
     "declarations": {
       "patterns": [
