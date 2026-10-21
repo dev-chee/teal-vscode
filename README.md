@@ -22,11 +22,11 @@ cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --b
 }
 ```
 
-请在 `D:\teal-lang` 中执行构建命令，且使用同次构建的四个工具。该目录应包含 `teal.exe`、`teal-lsp.exe`、`teal-dap.exe`、`teal-fmt.exe`。也可使用带完整 `runtime` 资源的 Teal 分发目录。使用集成终端调试时，工具链必须包含本项目配套的 DAP `console` 支持。
+请在 `D:\teal-lang` 中执行构建命令，且使用同次构建的四个工具。该目录应包含 `teal.exe`、`teal-lsp.exe`、`teal-dap.exe`、`teal-fmt.exe`。也可使用 Teal 纯二进制分发目录，运行时资源由工具内嵌。使用集成终端调试时，工具链必须包含本项目配套的 DAP `console` 支持。
 
 配置为空时，按 PATH 顺序寻找第一个包含全部四项工具的目录；没有完整目录时使用第一个包含至少一项工具的目录。缺少工具仅停用对应功能，不跨目录拼接版本。显式目录无效时直接提示，不回退 PATH。PATH 中的空项或相对目录不参与查找；变更系统 PATH 后需要重启 VS Code。
 
-如果没有找到显式目录或完整 PATH 工具链，插件在受信任工作区自动安装托管工具链；也可执行 **Teal: 安装 Teal 工具链**。下载源为 `dev-chee/teal-vscode` 的公开 GitHub Releases，归档按当前宿主选择，并校验 GitHub 提供的 SHA-256 digest。归档内必须包含完整运行时和以下四个入口：
+如果没有找到显式目录或完整 PATH 工具链，插件在受信任工作区自动安装托管工具链；也可执行 **Teal: 安装 Teal 工具链**。下载源为 `dev-chee/teal-vscode` 的公开 GitHub Releases，归档按当前宿主选择，并校验 GitHub 提供的 SHA-256 digest。归档使用内嵌运行时资源，必须包含二进制完整性清单和以下四个入口：
 
 | 平台 | 发行归档 |
 | --- | --- |
@@ -37,7 +37,7 @@ cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --b
 
 平台按扩展宿主的操作系统、架构和 libc/ARM ABI 选择；无法确认 ABI 时仍可配置本地工具链，但不会猜测托管归档。下载源尚未发布对应平台时，安装会明确失败，不下载其他架构代替。
 
-托管工具链安装到扩展宿主的全局存储目录。`teal.toolchain.path` 始终优先；空配置时优先使用完整 PATH 工具链，再使用已安装的托管工具链。`teal.toolchain.release` 默认为 `latest`，与 CI 共用分页规则，选择版本号最高且包含全部 9 平台归档的正式 `toolchain-vX.Y.Z` Release；固定标签也必须包含全部目标。重新执行安装会先解析 Release，再按解析版本复用缓存，避免 `latest` 永久停留旧版本。下载源必须提供对应平台归档及 SHA-256 digest。安装与缓存加载共用 CI 的分发校验：四个工具必须是非空普通文件，Unix 工具须可执行；`runtime/manifest.json` 和每项资源的路径、大小、SHA-256 均须有效。坏包不会切换当前安装，损坏的托管缓存会被拒绝，可重新执行安装修复。
+托管工具链安装到扩展宿主的全局存储目录。`teal.toolchain.path` 始终优先；空配置时优先使用完整 PATH 工具链，再使用已安装的托管工具链。`teal.toolchain.release` 默认为 `latest`，与 CI 共用分页规则，选择版本号最高且包含全部 9 平台归档的正式 `toolchain-vX.Y.Z` Release；固定标签也必须包含全部目标。重新执行安装会先解析 Release，再按解析版本复用缓存，避免 `latest` 永久停留旧版本。下载源必须提供对应平台归档及 SHA-256 digest。安装与缓存加载共用 CI 的分发校验：四个工具必须是非空普通文件，Unix 工具须可执行；根目录 `manifest.json` 中每项二进制/格式元数据的文件名、大小、SHA-256 均须有效，归档不允许夹带源码或外置 `runtime/`。坏包不会切换当前安装，损坏的托管缓存会被拒绝，可重新执行安装修复。
 
 `teal.toolchain.autoUpdate` 默认为 `true`。插件激活时和每 6 小时检查托管版本，同宿主多窗口共享检查时间和安装锁；固定标签保持锁定。执行 **Teal: 检查并更新 Teal 工具链** 可立即检查，绕过节流和自动更新开关。显式路径和完整 PATH 始终优先；后台失败只写日志并保留旧版本。成功切换后刷新 LSP，已运行的程序和调试进程继续使用保留的旧目录。首次安装期间的工具调用等待准备完成。
 
@@ -207,6 +207,6 @@ macOS 中，由 Teal 程序通过 Host 启动的原生 Mach-O 进程使用冻结
 
 ## 全平台 CI
 
-在 `dev-chee/teal` 推送 `toolchain-vX.Y.Z` 标签，源码仓库的 `release-toolchain.yml` 固定该标签的源码 SHA，构建并验证全部 9 个目标，将完整草稿发布到 `dev-chee/teal-vscode`。源码 Actions 手动入口按已有标签重试。扩展仓库的 `publish-marketplace.yml` 只选择包含全部目标归档的同一个正式 Release，校验归档及 runtime 文件摘要，并执行平台单元测试和真实 CLI/LSP/DAP 协议测试。
+在 `dev-chee/teal` 推送 `toolchain-vX.Y.Z` 标签，源码仓库的 `release-toolchain.yml` 固定该标签的源码 SHA，构建并验证全部 9 个目标，将完整草稿发布到 `dev-chee/teal-vscode`。公共 Release 只分发工具链二进制及完整性/格式元数据，不包含 Teal 语言源码；标准包和知识由工具内嵌制品提供。源码 Actions 手动入口按已有标签重试。扩展仓库的 `publish-marketplace.yml` 只选择包含全部目标归档的同一个正式 Release，校验归档及各二进制文件摘要，并执行平台单元测试和真实 CLI/LSP/DAP 协议测试。
 
 GNU/Linux 归档基于 Ubuntu 22.04（glibc 2.35），Alpine 归档基于 Alpine 3.22。Windows、Linux、macOS 的 x64/ARM64 还运行 VS Code 宿主测试，覆盖集成终端调试、单步、变量、运行输入和 attach。CI 不启动外部终端与完整多根工作区交互测试；本地 `pnpm test` 可运行完整集合。Alpine 在对应架构容器中验证协议，ARMhf 在 QEMU 容器中验证，后者不等同于真实 ARMhf 机器验收。平台发布支持不代表这些尚未执行的 CI 检查已通过。

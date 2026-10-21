@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import type { ManagedToolchainTarget } from './platform';
 import distribution from './toolchain-targets.json';
 import { createReleasePolicy } from './toolchainReleaseCore.cjs';
+import { validateToolchainArchiveListing } from './toolchainDistributionCore.cjs';
 
 const releasePolicy = createReleasePolicy(distribution);
 export const selectToolchainRelease = releasePolicy.selectRelease;
@@ -40,10 +41,5 @@ export function validateAssetUrl(url: string): void {
 }
 
 export function validateArchiveListing(listing: string): void {
-    for (const entry of listing.split(/\r?\n/).map((value) => value.trim()).filter(Boolean)) {
-        const normalized = entry.replaceAll('\\', '/');
-        if (normalized.startsWith('/') || /^[A-Za-z]:/.test(normalized) || normalized.split('/').includes('..')) {
-            throw new Error(`The Teal toolchain archive contains an unsafe path: ${entry}`);
-        }
-    }
+    validateToolchainArchiveListing(listing);
 }

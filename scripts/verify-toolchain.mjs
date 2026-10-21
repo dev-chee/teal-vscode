@@ -4,7 +4,7 @@ import { appendFile, mkdir, mkdtemp, readdir, rename, rm, writeFile } from 'node
 import * as path from 'node:path';
 import { promisify, parseArgs } from 'node:util';
 import { archiveName, distribution, readRelease, targets } from './toolchain-release.mjs';
-import { verifyToolchainDistribution } from '../src/toolchainDistributionCore.cjs';
+import { validateToolchainArchiveListing, verifyToolchainDistribution } from '../src/toolchainDistributionCore.cjs';
 
 const exec = promisify(execFile);
 const { values } = parseArgs({ options: { target: { type: 'string' }, release: { type: 'string', default: 'latest' }, resolve: { type: 'boolean' } } });
@@ -33,10 +33,7 @@ if (values.resolve) {
         const archive = path.join(verification, name);
         await writeFile(archive, bytes);
         const listing = await exec('tar', ['-tf', archive], { maxBuffer: 4 * 1024 * 1024 });
-        for (const entry of listing.stdout.split(/\r?\n/).filter(Boolean)) {
-            const normalized = entry.replaceAll('\\', '/');
-            if (normalized.startsWith('/') || /^[a-z]:/i.test(normalized) || normalized.split('/').includes('..')) throw new Error(`Unsafe archive path: ${entry}`);
-        }
+        validateToolchainArchiveListing(listing.stdout);
         const extracted = path.join(verification, 'contents');
         await mkdir(extracted);
         await exec('tar', ['-xf', archive, '-C', extracted], { maxBuffer: 4 * 1024 * 1024 });

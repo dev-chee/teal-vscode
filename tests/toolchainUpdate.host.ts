@@ -68,7 +68,7 @@ export async function run(): Promise<void> {
         const second = JSON.parse(await readFile(stateFile, 'utf8'));
         assert.equal(second.release, 'toolchain-v2.0.0');
         assert.notEqual(second.directory, first.directory);
-        assert.ok((await readFile(path.join(first.directory, 'runtime/manifest.json'))).length);
+        assert.ok((await readFile(path.join(first.directory, 'manifest.json'))).length);
         await hover();
         await vscode.commands.executeCommand('teal.checkToolchainUpdates');
         assert.equal(downloads, 2);

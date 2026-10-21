@@ -9,19 +9,23 @@ import test from 'node:test';
 import { archiveName, targets } from './toolchain-release.mjs';
 
 // POSIX 夹具保留真实 tar 权限位；Windows 对应安装路径由原生 CI 验证。
-test('installer gate verifies archive digest, executable tools and every runtime resource', { skip: process.platform === 'win32' }, async () => {
+test('installer gate verifies archive digest, executable tools and the binary-only distribution manifest', { skip: process.platform === 'win32' }, async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'teal-release-verification-'));
     try {
         const bundle = path.join(root, 'bundle');
-        await mkdir(path.join(bundle, 'runtime'), { recursive: true });
+        await mkdir(bundle, { recursive: true });
         for (const tool of ['teal', 'teal-lsp', 'teal-dap', 'teal-fmt']) {
             const file = path.join(bundle, tool);
             await writeFile(file, '#!/bin/sh\nexit 0\n');
             await chmod(file, 0o755);
         }
         const content = Buffer.from('fixture runtime');
-        await writeFile(path.join(bundle, 'runtime/resource.txt'), content);
-        const runtimeManifest = { formatVersion: 1, files: [{ path: 'resource.txt', size: content.length, sha256: createHash('sha256').update(content).digest('hex') }] };
+        await writeFile(path.join(bundle, 'toolchain.json'), content);
+        const runtimeManifest = { formatVersion: 1, files: [{ path: 'toolchain.json', size: content.length, sha256: createHash('sha256').update(content).digest('hex') }] };
+        for (const tool of ['teal', 'teal-lsp', 'teal-dap', 'teal-fmt']) {
+            const bytes = await readFile(path.join(bundle, tool));
+            runtimeManifest.files.push({ path: tool, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
+        }
         const archive = path.join(root, 'fixture.tar.gz');
         const preload = path.join(root, 'mock-fetch.mjs');
         await writeFile(preload, `
@@ -33,7 +37,7 @@ test('installer gate verifies archive digest, executable tools and every runtime
         const invoke = async (corruptArchive, corruptRuntime) => {
             const manifest = structuredClone(runtimeManifest);
             if (corruptRuntime) manifest.files[0].sha256 = '0'.repeat(64);
-            await writeFile(path.join(bundle, 'runtime/manifest.json'), JSON.stringify(manifest));
+            await writeFile(path.join(bundle, 'manifest.json'), JSON.stringify(manifest));
             const packed = spawnSync('tar', ['-czf', archive, '-C', root, 'bundle'], { encoding: 'utf8' });
             assert.equal(packed.status, 0, packed.stderr);
             const digest = createHash('sha256').update(await readFile(archive)).digest('hex');
@@ -49,14 +53,14 @@ test('installer gate verifies archive digest, executable tools and every runtime
         const success = await invoke(false, false);
         assert.equal(success.status, 0, success.stderr);
         const installed = await readFile(path.join(root, 'target/toolchain-path.txt'), 'utf8');
-        assert.equal(await readFile(path.join(installed, 'runtime/resource.txt'), 'utf8'), content.toString());
+        assert.equal(await readFile(path.join(installed, 'toolchain.json'), 'utf8'), content.toString());
         assert.match(await readFile(path.join(root, 'github-env'), 'utf8'), /TEAL_TOOLCHAIN_PATH=/);
         const badArchive = await invoke(true, false);
         assert.notEqual(badArchive.status, 0);
         assert.match(badArchive.stderr, /SHA-256 verification failed/);
         const badRuntime = await invoke(false, true);
         assert.notEqual(badRuntime.status, 0);
-        assert.match(badRuntime.stderr, /Runtime digest mismatch/);
+        assert.match(badRuntime.stderr, /Distribution digest mismatch/);
     } finally {
         await rm(root, { recursive: true, force: true });
     }
@@ -84,17 +88,20 @@ async function verifierFixture(t) {
     async function invoke({ name = 'teal-0.1.0', content = 'original runtime', omit } = {}) {
         const payload = path.join(root, `payload-${sequence++}`);
         const bundle = path.join(payload, name);
-        await mkdir(path.join(bundle, 'runtime'), { recursive: true });
+        await mkdir(bundle, { recursive: true });
         for (const tool of ['teal', 'teal-lsp', 'teal-dap', 'teal-fmt']) {
             const file = path.join(bundle, tool + (target.startsWith('win32-') ? '.exe' : ''));
             await writeFile(file, 'fixture executable, never executed');
             await chmod(file, 0o755);
         }
         const resource = Buffer.from(content);
-        await writeFile(path.join(bundle, 'runtime/resource.txt'), resource);
-        await writeFile(path.join(bundle, 'runtime/manifest.json'), JSON.stringify({ formatVersion: 1, files: [{
-            path: 'resource.txt', size: resource.length, sha256: createHash('sha256').update(resource).digest('hex'),
-        }] }));
+        await writeFile(path.join(bundle, 'toolchain.json'), resource);
+        const files = [];
+        for (const file of await readdir(bundle)) {
+            const bytes = await readFile(path.join(bundle, file));
+            files.push({ path: file, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
+        }
+        await writeFile(path.join(bundle, 'manifest.json'), JSON.stringify({ formatVersion: 1, files }));
         if (omit) await rm(path.join(bundle, omit === 'teal-lsp' && target.startsWith('win32-') ? 'teal-lsp.exe' : omit));
         const archive = path.join(payload, 'fixture.tar.gz');
         const packed = spawnSync('tar', ['-czf', archive, '-C', payload, name], { encoding: 'utf8' });
@@ -112,7 +119,7 @@ async function verifierFixture(t) {
     return { invoke, targetRoot, selection, exported };
 }
 
-for (const omit of ['teal-lsp', 'runtime/resource.txt']) {
+for (const omit of ['teal-lsp', 'toolchain.json']) {
     test(`repeated verification rejects a missing ${omit} and preserves the previous selection`, async t => {
         const fixture = await verifierFixture(t);
         const first = await fixture.invoke();
@@ -125,7 +132,7 @@ for (const omit of ['teal-lsp', 'runtime/resource.txt']) {
         assert.match(broken.stderr, /ENOENT/);
         assert.equal(await readFile(fixture.selection, 'utf8'), selected);
         assert.equal(await readFile(fixture.exported, 'utf8'), exported);
-        assert.equal(await readFile(path.join(selected, 'runtime/resource.txt'), 'utf8'), 'original runtime');
+        assert.equal(await readFile(path.join(selected, 'toolchain.json'), 'utf8'), 'original runtime');
         assert.deepEqual(await readdir(fixture.targetRoot), generations, 'failed candidates must be removed without deleting the old installation');
     });
 }
@@ -140,8 +147,8 @@ for (const name of ['teal-0.1.0', 'teal-0.2.0']) {
         assert.equal(next.status, 0, next.stderr);
         const selected = await readFile(fixture.selection, 'utf8');
         assert.notEqual(selected, previous, 'each verified archive must retain its own directory');
-        assert.equal(await readFile(path.join(selected, 'runtime/resource.txt'), 'utf8'), 'updated runtime');
-        assert.equal(await readFile(path.join(previous, 'runtime/resource.txt'), 'utf8'), 'original runtime');
+        assert.equal(await readFile(path.join(selected, 'toolchain.json'), 'utf8'), 'updated runtime');
+        assert.equal(await readFile(path.join(previous, 'toolchain.json'), 'utf8'), 'original runtime');
         assert.equal((await readFile(fixture.exported, 'utf8')).trim().split(/\r?\n/).at(-1), `TEAL_TOOLCHAIN_PATH=${selected}`);
     });
 }

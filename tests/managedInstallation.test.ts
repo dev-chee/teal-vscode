@@ -15,26 +15,42 @@ const target = currentManagedToolchainTarget();
 assert.ok(target, 'installation regressions require a supported native host');
 const nativeTarget = target;
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-type Defect = 'missing-runtime' | 'corrupt-runtime' | 'empty-tool' | 'missing-resource' | 'bad-manifest' | 'unsafe-path' | 'non-executable';
+type Defect = 'missing-manifest' | 'corrupt-metadata' | 'empty-tool' | 'missing-metadata' | 'bad-manifest' | 'unsafe-path' | 'non-executable' | 'source-file' | 'source-directory' | 'source-in-manifest';
 
 async function archive(root: string, name: string, defect?: Defect) {
     const fixture = path.join(root, name);
     const bundle = path.join(fixture, 'bundle');
-    await mkdir(path.join(bundle, 'runtime'), { recursive: true });
+    await mkdir(bundle, { recursive: true });
     for (const tool of ['teal', 'teal-lsp', 'teal-dap', 'teal-fmt']) {
         const file = path.join(bundle, executableName(tool));
         await writeFile(file, defect === 'empty-tool' && tool === 'teal' ? '' : 'fixture executable');
         await chmod(file, defect === 'non-executable' && tool === 'teal' ? 0o600 : 0o755);
     }
-    const content = Buffer.from(`runtime ${name}`);
-    await writeFile(path.join(bundle, 'runtime/resource.txt'), content);
+    const content = Buffer.from(`metadata ${name}`);
+    await writeFile(path.join(bundle, 'toolchain.json'), content);
     const manifest = { formatVersion: defect === 'bad-manifest' ? 99 : 1, files: [{
-        path: defect === 'unsafe-path' ? '../outside.txt' : 'resource.txt', size: content.length,
-        sha256: defect === 'corrupt-runtime' ? '0'.repeat(64) : digest(content),
+        path: defect === 'unsafe-path' ? '../outside.txt' : 'toolchain.json', size: content.length,
+        sha256: defect === 'corrupt-metadata' ? '0'.repeat(64) : digest(content),
     }] };
-    await writeFile(path.join(bundle, 'runtime/manifest.json'), JSON.stringify(manifest));
-    if (defect === 'missing-runtime') await rm(path.join(bundle, 'runtime'), { recursive: true });
-    if (defect === 'missing-resource') await rm(path.join(bundle, 'runtime/resource.txt'));
+    for (const tool of ['teal', 'teal-lsp', 'teal-dap', 'teal-fmt']) {
+        const file = executableName(tool);
+        const bytes = await readFile(path.join(bundle, file));
+        manifest.files.push({ path: file, size: bytes.length, sha256: digest(bytes) });
+    }
+    await writeFile(path.join(bundle, 'manifest.json'), JSON.stringify(manifest));
+    if (defect === 'source-file') await writeFile(path.join(bundle, 'compiler.rs'), 'fn main() {}');
+    if (defect === 'source-directory') {
+        await mkdir(path.join(bundle, 'runtime/packages'), { recursive: true });
+        await writeFile(path.join(bundle, 'runtime/packages/std.tl'), 'pub fn source() {}');
+    }
+    if (defect === 'source-in-manifest') {
+        const bytes = Buffer.from('fn main() {}');
+        await writeFile(path.join(bundle, 'compiler.rs'), bytes);
+        manifest.files.push({ path: 'compiler.rs', size: bytes.length, sha256: digest(bytes) });
+        await writeFile(path.join(bundle, 'manifest.json'), JSON.stringify(manifest));
+    }
+    if (defect === 'missing-manifest') await rm(path.join(bundle, 'manifest.json'));
+    if (defect === 'missing-metadata') await rm(path.join(bundle, 'toolchain.json'));
     const packed = path.join(fixture, 'fixture.tar.gz');
     // tar 在 Windows 和 Unix 均按内容识别格式；夹具只验证安装入口，不执行假工具。
     const result = spawnSync('tar', ['-czf', packed, '-C', fixture, 'bundle'], { encoding: 'utf8' });
@@ -51,7 +67,7 @@ function context(root: string): ExtensionContext {
 }
 const statePath = (ctx: ExtensionContext) => path.join(ctx.globalStorageUri.fsPath, 'managed-toolchain/current.json');
 
-test('real installer selects the complete release, preserves runtime and reuses a validated cache', async t => {
+test('real installer selects the complete release, uses embedded runtime and reuses a validated cache', async t => {
     const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-install-entry-')));
     try {
         const valid = await archive(root, 'complete-v1');
@@ -68,7 +84,7 @@ test('real installer selects the complete release, preserves runtime and reuses 
         });
         const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
         assert.equal(installed.release, 'toolchain-v1.0.0');
-        assert.equal(await readFile(path.join(installed.directory, 'runtime/resource.txt'), 'utf8'), 'runtime complete-v1');
+        assert.equal(await readFile(path.join(installed.directory, 'toolchain.json'), 'utf8'), 'metadata complete-v1');
         assert.equal(await loadManagedToolchain(ctx), installed.directory);
         assert.equal(await loadManagedToolchain(ctx, 'toolchain-v1.0.0'), installed.directory);
         assert.equal(await loadManagedToolchain(ctx, 'toolchain-v2.0.0'), undefined, 'a legacy selection cannot satisfy another folder pin');
@@ -87,20 +103,20 @@ test('real installer rejects invalid distributions without changing the previous
         const ctx = context(root);
         const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
         const before = await readFile(statePath(ctx), 'utf8');
-        const defects: Defect[] = ['missing-runtime', 'corrupt-runtime', 'empty-tool', 'missing-resource', 'bad-manifest', 'unsafe-path'];
+        const defects: Defect[] = ['missing-manifest', 'corrupt-metadata', 'empty-tool', 'missing-metadata', 'bad-manifest', 'unsafe-path', 'source-file', 'source-directory', 'source-in-manifest'];
         if (process.platform !== 'win32') defects.push('non-executable');
         for (const defect of defects) {
             selected = await archive(root, `invalid-${defect}`, defect);
             await assert.rejects(installManagedToolchain(ctx, 'latest', nativeTarget), defect);
             assert.equal(await readFile(statePath(ctx), 'utf8'), before, defect);
             assert.equal(await loadManagedToolchain(ctx), installed.directory, defect);
-            assert.equal(await readFile(path.join(installed.directory, 'runtime/resource.txt'), 'utf8'), 'runtime valid-v1');
+            assert.equal(await readFile(path.join(installed.directory, 'toolchain.json'), 'utf8'), 'metadata valid-v1');
             assert.deepEqual((await readdir(path.dirname(statePath(ctx)))).sort(), ['current.json', 'installations']);
         }
     } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('real installer repairs corrupt runtime and empty executables in a same-tag cache', async t => {
+test('real installer repairs corrupt metadata and empty executables in a same-tag cache', async t => {
     const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-install-repair-')));
     try {
         const valid = await archive(root, 'complete-v1');
@@ -112,7 +128,7 @@ test('real installer repairs corrupt runtime and empty executables in a same-tag
         });
         const ctx = context(root);
         const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
-        for (const file of ['runtime/resource.txt', executableName('teal')]) {
+        for (const file of ['toolchain.json', executableName('teal')]) {
             await writeFile(path.join(installed.directory, file), '');
             assert.equal(await loadManagedToolchain(ctx), undefined, file);
             const repaired = await installManagedToolchain(ctx, 'latest', nativeTarget);
@@ -166,14 +182,14 @@ test('real installer preserves the old selection on commit I/O failures and can 
                 await assert.rejects(installManagedToolchain(ctx, 'latest', nativeTarget), error => error === failure);
                 assert.equal(await readFile(statePath(ctx), 'utf8'), before);
                 assert.equal(await loadManagedToolchain(ctx), installed.directory);
-                assert.equal(await readFile(path.join(installed.directory, 'runtime/resource.txt'), 'utf8'), 'runtime v1');
+                assert.equal(await readFile(path.join(installed.directory, 'toolchain.json'), 'utf8'), 'metadata v1');
                 assert.ok(!(await readdir(path.dirname(statePath(ctx)))).some(name => name.startsWith('.staging-')));
             });
         }
         const recovered = await installManagedToolchain(ctx, 'latest', nativeTarget);
         assert.equal(recovered.release, 'toolchain-v2.0.0');
         assert.equal(await loadManagedToolchain(ctx), recovered.directory);
-        assert.equal(await readFile(path.join(installed.directory, 'runtime/resource.txt'), 'utf8'), 'runtime v1');
+        assert.equal(await readFile(path.join(installed.directory, 'toolchain.json'), 'utf8'), 'metadata v1');
     } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -186,7 +202,7 @@ test('same-tag repair does not delete the previous generation when publishing fa
         const ctx = context(root);
         const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
         const before = await readFile(statePath(ctx), 'utf8');
-        await writeFile(path.join(installed.directory, 'runtime/resource.txt'), 'corrupt');
+        await writeFile(path.join(installed.directory, 'toolchain.json'), 'corrupt');
         const realRename = fs.rename.bind(fs);
         const fault = t.mock.method(fs, 'rename', async (...[source, destination]: Parameters<typeof fs.rename>) => {
             if (String(destination) === statePath(ctx)) throw Object.assign(new Error('injected publish failure'), { code: 'EACCES' });
@@ -199,7 +215,7 @@ test('same-tag repair does not delete the previous generation when publishing fa
         const repaired = await installManagedToolchain(ctx, 'latest', nativeTarget);
         assert.notEqual(repaired.directory, installed.directory);
         assert.equal(await loadManagedToolchain(ctx), repaired.directory);
-        assert.equal(await readFile(path.join(repaired.directory, 'runtime/resource.txt'), 'utf8'), 'runtime v1');
+        assert.equal(await readFile(path.join(repaired.directory, 'toolchain.json'), 'utf8'), 'metadata v1');
     } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -278,7 +294,7 @@ test('an unconfirmed publication keeps the selected data and remains recoverable
         readFault.mock.restore();
         const selected = JSON.parse(await readFile(statePath(ctx), 'utf8'));
         assert.equal(await loadManagedToolchain(ctx), selected.directory);
-        assert.equal(await readFile(path.join(selected.directory, 'runtime/resource.txt'), 'utf8'), 'runtime v1');
+        assert.equal(await readFile(path.join(selected.directory, 'toolchain.json'), 'utf8'), 'metadata v1');
     } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -318,7 +334,7 @@ test('concurrent installations cannot roll back a different successful generatio
         assert.equal(successes.length, 1);
         assert.equal(metadataReads, 2, "the lock serializes metadata and publication across installers");
         assert.equal(await loadManagedToolchain(ctx), successes[0].value.directory);
-        assert.equal(await readFile(path.join(previous.directory, 'runtime/resource.txt'), 'utf8'), 'runtime v1');
+        assert.equal(await readFile(path.join(previous.directory, 'toolchain.json'), 'utf8'), 'metadata v1');
     } finally { await rm(root, { recursive: true, force: true }); }
 });
 
@@ -509,6 +525,6 @@ test('independent windows retain a fixed legacy cache after another window updat
         assert.equal(await loadManagedToolchain(reopenedWindow, 'toolchain-v3.0.0'), undefined);
         assert.equal(await loadManagedToolchain(reopenedWindow, 'latest', [latest!.directory]), pinned.directory);
         assert.equal(network, before, 'offline cache selection must never fetch');
-        assert.equal(await readFile(path.join(pinned.directory, 'runtime/resource.txt'), 'utf8'), 'runtime v1');
+        assert.equal(await readFile(path.join(pinned.directory, 'toolchain.json'), 'utf8'), 'metadata v1');
     } finally { await rm(root, { recursive: true, force: true }); }
 });

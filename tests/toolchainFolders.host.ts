@@ -67,17 +67,19 @@ export async function run(): Promise<void> {
         process.env.PATH = originalPath;
 
         const bundle = path.join(root, 'bundle');
-        await mkdir(path.join(bundle, 'runtime'), { recursive: true });
+        await mkdir(bundle, { recursive: true });
         for (const tool of ['teal', 'teal-lsp', 'teal-dap', 'teal-fmt']) {
             const file = path.join(bundle, executableName(tool));
             await writeFile(file, 'fixture executable, never executed');
             await chmod(file, 0o755);
         }
-        const resource = Buffer.from('folder runtime');
-        await writeFile(path.join(bundle, 'runtime/resource.txt'), resource);
-        await writeFile(path.join(bundle, 'runtime/manifest.json'), JSON.stringify({ formatVersion: 1, files: [{
-            path: 'resource.txt', size: resource.length, sha256: createHash('sha256').update(resource).digest('hex'),
-        }] }));
+        const files = [];
+        for (const tool of ['teal', 'teal-lsp', 'teal-dap', 'teal-fmt']) {
+            const file = executableName(tool);
+            const bytes = await readFile(path.join(bundle, file));
+            files.push({ path: file, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
+        }
+        await writeFile(path.join(bundle, 'manifest.json'), JSON.stringify({ formatVersion: 1, files }));
         const packed = path.join(root, 'fixture.tar.gz');
         await promisify(execFile)('tar', ['-czf', packed, '-C', root, 'bundle']);
         const bytes = await readFile(packed);
@@ -143,7 +145,7 @@ export async function run(): Promise<void> {
         const removed = vscode.workspace.workspaceFolders!.findIndex(folder => folder.uri.toString() === folders[1].toString());
         assert.ok(vscode.workspace.updateWorkspaceFolders(removed, 1));
         await within(cancellation, 'removed folder download cancellation');
-        assert.ok((await readFile(path.join(path.dirname(selected[1]), 'runtime/manifest.json'))).length, 'removing a folder must preserve its previously installed generation');
+        assert.ok((await readFile(path.join(path.dirname(selected[1]), 'manifest.json'))).length, 'removing a folder must preserve its previously installed generation');
         console.log('PASS: folder local priority, opt-out, independent pins, cached reopening, and cancellation on folder removal');
     } finally {
         await deactivate();
