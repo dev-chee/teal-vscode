@@ -4,7 +4,7 @@ import { appendFile, mkdir, mkdtemp, readdir, rename, rm, writeFile } from 'node
 import * as path from 'node:path';
 import { promisify, parseArgs } from 'node:util';
 import { archiveName, distribution, readRelease, targets } from './toolchain-release.mjs';
-import { validateToolchainArchiveListing, verifyToolchainDistribution } from '../src/toolchainDistributionCore.cjs';
+import { validateToolchainArchiveListing, validateToolchainArchiveTypes, verifyToolchainDistribution } from '../src/toolchainDistributionCore.cjs';
 
 const exec = promisify(execFile);
 const { values } = parseArgs({ options: { target: { type: 'string' }, release: { type: 'string', default: 'latest' }, resolve: { type: 'boolean' } } });
@@ -33,6 +33,8 @@ if (values.resolve) {
         const archive = path.join(verification, name);
         await writeFile(archive, bytes);
         const listing = await exec('tar', ['-tf', archive], { maxBuffer: 4 * 1024 * 1024 });
+        const types = await exec('tar', ['-tvf', archive], { maxBuffer: 4 * 1024 * 1024 });
+        validateToolchainArchiveTypes(types.stdout);
         validateToolchainArchiveListing(listing.stdout);
         const extracted = path.join(verification, 'contents');
         await mkdir(extracted);

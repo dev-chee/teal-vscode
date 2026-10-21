@@ -15,7 +15,7 @@ const target = currentManagedToolchainTarget();
 assert.ok(target, 'installation regressions require a supported native host');
 const nativeTarget = target;
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
-type Defect = 'missing-manifest' | 'corrupt-metadata' | 'empty-tool' | 'missing-metadata' | 'bad-manifest' | 'unsafe-path' | 'non-executable' | 'source-file' | 'source-directory' | 'source-in-manifest';
+type Defect = 'missing-manifest' | 'corrupt-metadata' | 'empty-tool' | 'missing-metadata' | 'bad-manifest' | 'unsafe-path' | 'non-executable' | 'source-file' | 'source-directory' | 'source-in-manifest' | 'missing-runtime' | 'corrupt-runtime' | 'runtime-link';
 
 async function archive(root: string, name: string, defect?: Defect) {
     const fixture = path.join(root, name);
@@ -37,11 +37,31 @@ async function archive(root: string, name: string, defect?: Defect) {
         const bytes = await readFile(path.join(bundle, file));
         manifest.files.push({ path: file, size: bytes.length, sha256: digest(bytes) });
     }
+    const resources = {
+        'runtime/packages/catalog.toml': 'packages = ["std"]\n',
+        'runtime/packages/std/package.toml': 'modules = ["ui.tl"]\n',
+        'runtime/packages/std/builtins.tli': 'builtin global {}\n',
+        'runtime/packages/std/src/ui.tl': 'pub fn label() -> string { return "label"; }\n',
+        'runtime/config/config.toml': '',
+        'runtime/templates/config.toml': '[permissions]\nrules = []\n',
+    };
+    for (const [file, source] of Object.entries(resources)) {
+        await mkdir(path.dirname(path.join(bundle, file)), { recursive: true });
+        await writeFile(path.join(bundle, file), source);
+        const bytes = Buffer.from(source);
+        manifest.files.push({ path: file, size: bytes.length, sha256: digest(bytes) });
+    }
     await writeFile(path.join(bundle, 'manifest.json'), JSON.stringify(manifest));
+    if (defect === 'missing-runtime') await rm(path.join(bundle, 'runtime/packages/std/src/ui.tl'));
+    if (defect === 'corrupt-runtime') await writeFile(path.join(bundle, 'runtime/packages/std/src/ui.tl'), 'changed source');
+    if (defect === 'runtime-link') {
+        await rm(path.join(bundle, 'runtime/packages/std/src/ui.tl'));
+        await fs.symlink(path.join(bundle, 'toolchain.json'), path.join(bundle, 'runtime/packages/std/src/ui.tl'));
+    }
     if (defect === 'source-file') await writeFile(path.join(bundle, 'compiler.rs'), 'fn main() {}');
     if (defect === 'source-directory') {
-        await mkdir(path.join(bundle, 'runtime/packages'), { recursive: true });
-        await writeFile(path.join(bundle, 'runtime/packages/std.tl'), 'pub fn source() {}');
+        await mkdir(path.join(bundle, 'runtime/private'), { recursive: true });
+        await writeFile(path.join(bundle, 'runtime/private/compiler.rs'), 'fn main() {}');
     }
     if (defect === 'source-in-manifest') {
         const bytes = Buffer.from('fn main() {}');
@@ -67,7 +87,7 @@ function context(root: string): ExtensionContext {
 }
 const statePath = (ctx: ExtensionContext) => path.join(ctx.globalStorageUri.fsPath, 'managed-toolchain/current.json');
 
-test('real installer selects the complete release, uses embedded runtime and reuses a validated cache', async t => {
+test('real installer selects runtime sources with the complete release and reuses a validated cache', async t => {
     const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-install-entry-')));
     try {
         const valid = await archive(root, 'complete-v1');
@@ -85,6 +105,8 @@ test('real installer selects the complete release, uses embedded runtime and reu
         const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
         assert.equal(installed.release, 'toolchain-v1.0.0');
         assert.equal(await readFile(path.join(installed.directory, 'toolchain.json'), 'utf8'), 'metadata complete-v1');
+        assert.match(await readFile(path.join(installed.directory, 'runtime/packages/std/src/ui.tl'), 'utf8'), /pub fn label/);
+        assert.equal(await readFile(path.join(installed.directory, 'runtime/config/config.toml'), 'utf8'), '');
         assert.equal(await loadManagedToolchain(ctx), installed.directory);
         assert.equal(await loadManagedToolchain(ctx, 'toolchain-v1.0.0'), installed.directory);
         assert.equal(await loadManagedToolchain(ctx, 'toolchain-v2.0.0'), undefined, 'a legacy selection cannot satisfy another folder pin');
@@ -103,8 +125,8 @@ test('real installer rejects invalid distributions without changing the previous
         const ctx = context(root);
         const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
         const before = await readFile(statePath(ctx), 'utf8');
-        const defects: Defect[] = ['missing-manifest', 'corrupt-metadata', 'empty-tool', 'missing-metadata', 'bad-manifest', 'unsafe-path', 'source-file', 'source-directory', 'source-in-manifest'];
-        if (process.platform !== 'win32') defects.push('non-executable');
+        const defects: Defect[] = ['missing-manifest', 'corrupt-metadata', 'empty-tool', 'missing-metadata', 'bad-manifest', 'unsafe-path', 'source-file', 'source-directory', 'source-in-manifest', 'missing-runtime', 'corrupt-runtime'];
+        if (process.platform !== 'win32') defects.push('non-executable', 'runtime-link');
         for (const defect of defects) {
             selected = await archive(root, `invalid-${defect}`, defect);
             await assert.rejects(installManagedToolchain(ctx, 'latest', nativeTarget), defect);
@@ -128,7 +150,7 @@ test('real installer repairs corrupt metadata and empty executables in a same-ta
         });
         const ctx = context(root);
         const installed = await installManagedToolchain(ctx, 'latest', nativeTarget);
-        for (const file of ['toolchain.json', executableName('teal')]) {
+        for (const file of ['toolchain.json', executableName('teal'), 'runtime/packages/std/src/ui.tl']) {
             await writeFile(path.join(installed.directory, file), '');
             assert.equal(await loadManagedToolchain(ctx), undefined, file);
             const repaired = await installManagedToolchain(ctx, 'latest', nativeTarget);
@@ -137,7 +159,7 @@ test('real installer repairs corrupt metadata and empty executables in a same-ta
             assert.equal(await loadManagedToolchain(ctx), repaired.directory);
             installed.directory = repaired.directory;
         }
-        assert.equal(downloads, 3);
+        assert.equal(downloads, 4);
     } finally { await rm(root, { recursive: true, force: true }); }
 });
 

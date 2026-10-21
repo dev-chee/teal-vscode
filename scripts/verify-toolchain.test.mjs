@@ -7,9 +7,23 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { archiveName, targets } from './toolchain-release.mjs';
+import { validateToolchainArchiveListing, validateToolchainArchiveTypes } from '../src/toolchainDistributionCore.cjs';
+
+test('archive listings allow runtime Teal sources and reject implementation files and links', () => {
+    const valid = 'bundle/\nbundle/teal\nbundle/runtime/\nbundle/runtime/packages/\nbundle/runtime/packages/std/src/ui.tl\n';
+    assert.doesNotThrow(() => validateToolchainArchiveListing(valid));
+    for (const file of ['compiler.rs', 'runtime/compiler.rs', 'runtime/build.py', 'runtime/Cargo.toml',
+        'runtime/.git/config.toml', 'runtime/../source.tl', 'runtime/target/source.tl']) {
+        assert.throws(() => validateToolchainArchiveListing(`${valid}bundle/${file}\n`));
+    }
+    assert.doesNotThrow(() => validateToolchainArchiveTypes('drwxr-xr-x root\n-rw-r--r-- root/runtime/source.tl\n'));
+    for (const type of ['l', 'h', 'b', 'c', 'p']) {
+        assert.throws(() => validateToolchainArchiveTypes(`${type}rwxr-xr-x root/runtime/source.tl\n`), /link or special/);
+    }
+});
 
 // POSIX 夹具保留真实 tar 权限位；Windows 对应安装路径由原生 CI 验证。
-test('installer gate verifies archive digest, executable tools and the binary-only distribution manifest', { skip: process.platform === 'win32' }, async () => {
+test('installer gate verifies archive digest, executable tools and runtime sources', { skip: process.platform === 'win32' }, async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'teal-release-verification-'));
     try {
         const bundle = path.join(root, 'bundle');
@@ -26,6 +40,7 @@ test('installer gate verifies archive digest, executable tools and the binary-on
             const bytes = await readFile(path.join(bundle, tool));
             runtimeManifest.files.push({ path: tool, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
         }
+        await writeRuntimeFixture(bundle, runtimeManifest.files);
         const archive = path.join(root, 'fixture.tar.gz');
         const preload = path.join(root, 'mock-fetch.mjs');
         await writeFile(preload, `
@@ -36,7 +51,8 @@ test('installer gate verifies archive digest, executable tools and the binary-on
         `);
         const invoke = async (corruptArchive, corruptRuntime) => {
             const manifest = structuredClone(runtimeManifest);
-            if (corruptRuntime) manifest.files[0].sha256 = '0'.repeat(64);
+            if (corruptRuntime) manifest.files[corruptRuntime === 'source'
+                ? manifest.files.findIndex(file => file.path === 'runtime/packages/std/src/ui.tl') : 0].sha256 = '0'.repeat(64);
             await writeFile(path.join(bundle, 'manifest.json'), JSON.stringify(manifest));
             const packed = spawnSync('tar', ['-czf', archive, '-C', root, 'bundle'], { encoding: 'utf8' });
             assert.equal(packed.status, 0, packed.stderr);
@@ -61,6 +77,9 @@ test('installer gate verifies archive digest, executable tools and the binary-on
         const badRuntime = await invoke(false, true);
         assert.notEqual(badRuntime.status, 0);
         assert.match(badRuntime.stderr, /Distribution digest mismatch/);
+        const badSource = await invoke(false, 'source');
+        assert.notEqual(badSource.status, 0);
+        assert.match(badSource.stderr, /Distribution digest mismatch: runtime\/packages\/std\/src\/ui.tl/);
     } finally {
         await rm(root, { recursive: true, force: true });
     }
@@ -101,6 +120,7 @@ async function verifierFixture(t) {
             const bytes = await readFile(path.join(bundle, file));
             files.push({ path: file, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
         }
+        await writeRuntimeFixture(bundle, files);
         await writeFile(path.join(bundle, 'manifest.json'), JSON.stringify({ formatVersion: 1, files }));
         if (omit) await rm(path.join(bundle, omit === 'teal-lsp' && target.startsWith('win32-') ? 'teal-lsp.exe' : omit));
         const archive = path.join(payload, 'fixture.tar.gz');
@@ -117,6 +137,22 @@ async function verifierFixture(t) {
         });
     }
     return { invoke, targetRoot, selection, exported };
+}
+
+/** 与官方包相同的外置资源布局，纳入同一根完整性清单。 */
+async function writeRuntimeFixture(bundle, files) {
+    for (const [file, source] of Object.entries({
+        'runtime/packages/catalog.toml': 'packages = ["std"]\n',
+        'runtime/packages/std/package.toml': 'modules = ["ui.tl"]\n',
+        'runtime/packages/std/builtins.tli': 'builtin global {}\n',
+        'runtime/packages/std/src/ui.tl': 'pub fn label() -> string { return "label"; }\n',
+        'runtime/config/config.toml': '',
+    })) {
+        await mkdir(path.dirname(path.join(bundle, file)), { recursive: true });
+        await writeFile(path.join(bundle, file), source);
+        const bytes = Buffer.from(source);
+        files.push({ path: file, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
+    }
 }
 
 for (const omit of ['teal-lsp', 'toolchain.json']) {

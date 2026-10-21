@@ -9,7 +9,7 @@ import { parseManagedState, type ManagedState } from './managedState';
 import { currentToolchainTarget } from './hostPlatform';
 import { parseSha256Digest, readToolchainRelease, releaseAssetName, validateArchiveListing, validateAssetUrl, verifySha256, type ReleaseAsset } from './toolchainDownloadCore';
 import { inspectToolchain, isCompleteToolchain, toolNames } from './toolchain';
-import { verifyToolchainDistribution } from './toolchainDistributionCore.cjs';
+import { validateToolchainArchiveTypes, verifyToolchainDistribution } from './toolchainDistributionCore.cjs';
 import { compareToolchainVersions } from './toolchainReleaseCore.cjs';
 import distribution from './toolchain-targets.json';
 import { withManagedLock } from './managedLock';
@@ -57,6 +57,8 @@ async function downloadAsset(asset: ReleaseAsset, signal?: AbortSignal): Promise
 
 async function extractArchive(archive: string, destination: string): Promise<void> {
     const listed = await execFileAsync('tar', ['-tf', archive], { maxBuffer: 4 * 1024 * 1024 });
+    const types = await execFileAsync('tar', ['-tvf', archive], { maxBuffer: 4 * 1024 * 1024 });
+    validateToolchainArchiveTypes(types.stdout);
     validateArchiveListing(listed.stdout);
     await execFileAsync('tar', ['-xf', archive, '-C', destination], { maxBuffer: 4 * 1024 * 1024 });
 }
