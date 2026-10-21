@@ -38,7 +38,7 @@ test('session coordination refreshes a real parent LSP after saving a nested dep
     await mkdir(path.join(root, 'child'));
     const main = document(path.join(root, 'main.tl'));
     const lib = document(path.join(root, 'child/lib.tl'));
-    await writeFile(main.path, 'import "child/lib.tl" as lib;\nfn main() { let value: int = lib::value(); print(value); }\n');
+    await writeFile(main.path, 'use package::child::lib;\nfn main() { let value: int = lib::value(); print(value); }\n');
     await writeFile(lib.path, 'pub fn value() -> int { return 1; }\n');
     const groups = [{ key: 'parent', root, documents: [main] }, { key: 'child', root: path.dirname(lib.path), documents: [lib] }];
     const sessions = new LanguageSessions({

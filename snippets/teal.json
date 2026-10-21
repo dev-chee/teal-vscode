@@ -7,7 +7,7 @@
   "Iteration": {"prefix": "for", "body": ["for ${1:item} in ${2:items} {", "    $0", "}"], "description": "Collection iteration"},
   "Task main": {"prefix": "taskmain", "body": ["task main() {", "    $0", "}"], "description": "支持 .await 的异步入口"},
   "Task": {"prefix": "task", "body": ["task ${1:name}(${2:argument}: ${3:int}) -> ${4:int} {", "    $0", "}"], "description": "异步任务，调用返回 Task<T>，使用 .await 等待结果"},
-  "Import": {"prefix": "import", "body": ["import \"${1:module.tl}\" as ${2:module};"], "description": "导入源码模块"},
+  "Use module": {"prefix": "use", "body": ["use ${1:std::json} as ${2:json};"], "description": "通过逻辑模块路径导入模块"},
   "Host module": {"prefix": "host", "body": ["host \"${1:std.fs}\" as ${2:fs};"], "description": "声明宿主模块别名；调用权限由运行配置控制"},
   "Constant": {"prefix": "const", "body": ["const ${1:NAME}: ${2:int} = ${3:0};"], "description": "编译期常量"}
 }

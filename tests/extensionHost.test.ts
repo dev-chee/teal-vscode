@@ -1,7 +1,7 @@
 import * as assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import Mocha from 'mocha';
@@ -158,6 +158,66 @@ export function run(): Promise<void> {
                 }, 'unsaved edits must be sent to LSP diagnostics');
                 assert.equal(diagnostics.range.start.line, 1, 'diagnostic must refer to the unsaved second-line edit');
             } finally {
+                await closeAndRemove(root);
+            }
+        });
+
+        test('serves concrete LSP updates for external path dependencies, deletion recovery and manifest retargeting', async () => {
+            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-external-dependency-'));
+            const app = path.join(root, 'app');
+            const dependency = path.join(root, 'dep/src/lib.tl');
+            const replacement = path.join(root, 'replacement/src/lib.tl');
+            const main = vscode.Uri.file(path.join(app, 'src/main.tl'));
+            const anchorCount = vscode.workspace.workspaceFolders?.length ?? 0;
+            const manifest = (name: string, module: string) => `format = 10\nname = "${name}"\nversion = "1.0.0"\nlanguage_edition = "2026"\nmodules = ["${module}"]\n`;
+            const appManifest = (relative: string) => manifest('app', 'main.tl')
+                + `[dependencies]\ndep = { path = "${relative}", version = "1.0.0" }\n`;
+            const errors = () => vscode.languages.getDiagnostics(main).filter(item => item.severity === vscode.DiagnosticSeverity.Error);
+            try {
+                for (const name of ['app', 'dep', 'replacement']) await mkdir(path.join(root, name, 'src'), { recursive: true });
+                await writeFile(path.join(app, 'package.toml'), appManifest('../dep'));
+                await writeFile(path.join(root, 'dep/package.toml'), manifest('dep', 'lib.tl'));
+                await writeFile(path.join(root, 'replacement/package.toml'), manifest('dep', 'lib.tl'));
+                await writeFile(dependency, 'pub fn value() -> int { return 1; }\n');
+                await writeFile(replacement, 'pub fn value() -> int { return 2; }\n');
+                await writeFile(main.fsPath, 'use dep::lib;\nfn main() {\n    let value: int = lib::value();\n    print(value);\n}\n');
+                await vscode.workspace.getConfiguration('teal').update('toolchain.path', process.env.TEAL_TOOLCHAIN_PATH!, vscode.ConfigurationTarget.Global);
+                assert.equal(vscode.workspace.updateWorkspaceFolders(anchorCount, 0, { uri: vscode.Uri.file(app), name: 'consumer' }), true);
+                await waitFor(async () => vscode.workspace.workspaceFolders?.some(folder => folder.uri.fsPath.toLowerCase() === app.toLowerCase()) ? true : undefined, 'consumer workspace must be added');
+                const document = await vscode.workspace.openTextDocument(main);
+                await vscode.window.showTextDocument(document);
+                const position = document.positionAt(document.getText().indexOf('lib::value') + 'lib::v'.length);
+                const definition = () => vscode.commands.executeCommand<vscode.Location[]>('vscode.executeDefinitionProvider', main, position);
+                await waitFor(async () => {
+                    const target = (await definition())?.[0];
+                    return target?.uri.fsPath.toLowerCase() === dependency.toLowerCase() ? true : undefined;
+                }, 'external dependency must initially resolve');
+                assert.deepEqual(errors(), []);
+
+                await writeFile(dependency, 'pub fn padding() -> int { return 0; }\npub fn value() -> string { return "changed"; }\n');
+                await waitFor(async () => errors().some(item => /Expected int/.test(item.message)) ? true : undefined, 'external save must refresh consumer diagnostics without restart');
+                assert.equal((await definition())?.[0]?.range.start.line, 1, 'navigation must use the changed dependency text');
+
+                await rm(dependency);
+                await waitFor(async () => errors().some(item => /module|source|not found|cannot|missing/i.test(item.message)) ? true : undefined, 'deleted external dependency must invalidate its consumer');
+                await writeFile(dependency, 'pub fn value() -> int { return 3; }\n');
+                await waitFor(async () => errors().length === 0 ? true : undefined, 'recreated external dependency must recover without restart');
+
+                await writeFile(path.join(app, 'package.toml'), appManifest('../replacement'));
+                await waitFor(async () => {
+                    const target = (await definition())?.[0];
+                    return target?.uri.fsPath.toLowerCase() === replacement.toLowerCase() ? true : undefined;
+                }, 'manifest change must replace the watched dependency');
+                // VS Code 异步安装新目录的系统监听；等其就绪后再产生后续磁盘变化。
+                await new Promise(resolve => setTimeout(resolve, 1000));
+                await writeFile(replacement, 'pub fn value() -> string { return "replacement"; }\n');
+                await waitFor(async () => errors().some(item => /Expected int/.test(item.message)) ? true : undefined, 'replacement dependency must be watched');
+            } finally {
+                await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+                if ((vscode.workspace.workspaceFolders?.length ?? 0) > anchorCount) {
+                    vscode.workspace.updateWorkspaceFolders(anchorCount, (vscode.workspace.workspaceFolders?.length ?? 0) - anchorCount);
+                    await waitFor(async () => vscode.workspace.workspaceFolders?.length === anchorCount ? true : undefined, 'consumer workspace must be removed');
+                }
                 await closeAndRemove(root);
             }
         });

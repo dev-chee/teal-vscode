@@ -51,49 +51,67 @@ export class LanguageClients {
     }
 
     private async start(group: Group): Promise<LanguageSession> {
-        const sourceCommand = await executable('teal-lsp', group.folder.uri);
-        const command = await stageLanguageServerExecutable(sourceCommand);
-        const environment = await languageServerEnvironment(sourceCommand);
         const config = vscode.workspace.getConfiguration('teal', group.folder.uri);
         const entryFiles = stringArray(config.get('lsp.entryFiles', []), 'teal.lsp.entryFiles').map((file) => path.resolve(group.root, file));
-        const options: LanguageClientOptions = {
-            documentSelector: group.documents.map((document) => ({ language: 'teal', scheme: 'file', pattern: globLiteral(document.path.replace(/\\/g, '/')) })),
-            workspaceFolder: group.folder,
-            initializationOptions: { entryFiles },
-            outputChannel: this.reporter.output,
-            traceOutputChannel: this.reporter.output,
-            errorHandler: { error: () => ({ action: ErrorAction.Shutdown }), closed: () => ({ action: CloseAction.DoNotRestart }) },
-            middleware: {
-                provideWorkspaceSymbols: async (query, token, next) => {
-                    const symbols = await next(query, token);
-                    return symbols?.filter((symbol) => this.sessions.owner(symbol.location.uri.fsPath) === group.key);
-                },
-            },
-        };
-        const client = new LanguageClient('teal', `Teal (${group.folder.name})`, { command, args: [], options: { cwd: group.root, env: environment } }, options);
+        const sourceCommand = await executable('teal-lsp', group.folder.uri);
+        const command = await stageLanguageServerExecutable(sourceCommand);
+        let client: LanguageClient | undefined;
         let started = false;
         let stopping = false;
-        const subscription = client.onDidChangeState((event) => {
-            if (event.newState === State.Stopped && started && !stopping) {
-                this.reporter.report(new Error(`Language server stopped for ${group.folder.name}. Run teal.restartServer to retry.`));
+        const subscriptions: vscode.Disposable[] = [];
+        const dispose = async () => {
+            stopping = true;
+            const failures: unknown[] = [];
+            for (const subscription of subscriptions.splice(0)) {
+                try { subscription.dispose(); }
+                catch (error) { failures.push(error); }
             }
-        });
-        const fileWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(group.folder, '**/*.tl'));
-        const changed = (uri: vscode.Uri) => this.sessions.diskChanged({ uri: uri.toString(), path: uri.fsPath });
-        const watcher = vscode.Disposable.from(fileWatcher, fileWatcher.onDidCreate(changed), fileWatcher.onDidDelete(changed), fileWatcher.onDidChange(changed));
-        const session: LanguageSession = {
-            isRunning: () => client.state === State.Running,
-            dispose: async () => {
-                stopping = true;
-                subscription.dispose();
-                watcher.dispose();
-                try { await client.dispose(); }
-                finally { await releaseLanguageServerExecutable(command); }
-            },
+            try { await client?.dispose(); }
+            catch (error) { failures.push(error); }
+            finally { await releaseLanguageServerExecutable(command); }
+            if (failures.length) throw new AggregateError(failures, 'Language server cleanup failed.');
         };
-        this.reporter.output.appendLine(`[LSP] Starting ${command} in ${group.root}`);
-        try { await client.start(); started = true; return session; }
-        catch (error) { await session.dispose(); throw error; }
+        // 复制后的环境、客户端和监听器初始化也可能失败，统一纳入清理范围。
+        try {
+            const environment = await languageServerEnvironment(sourceCommand);
+            const options: LanguageClientOptions = {
+                documentSelector: group.documents.map((document) => ({ language: 'teal', scheme: 'file', pattern: globLiteral(document.path.replace(/\\/g, '/')) })),
+                workspaceFolder: group.folder,
+                initializationOptions: { entryFiles },
+                outputChannel: this.reporter.output,
+                traceOutputChannel: this.reporter.output,
+                errorHandler: { error: () => ({ action: ErrorAction.Shutdown }), closed: () => ({ action: CloseAction.DoNotRestart }) },
+                middleware: {
+                    provideWorkspaceSymbols: async (query, token, next) => {
+                        const symbols = await next(query, token);
+                        return symbols?.filter((symbol) => this.sessions.owner(symbol.location.uri.fsPath) === group.key);
+                    },
+                },
+            };
+            const active = new LanguageClient('teal', `Teal (${group.folder.name})`, { command, args: [], options: { cwd: group.root, env: environment } }, options);
+            client = active;
+            subscriptions.push(active.onDidChangeState((event) => {
+                if (event.newState === State.Stopped && started && !stopping) {
+                    this.reporter.report(new Error(`Language server stopped for ${group.folder.name}. Run teal.restartServer to retry.`));
+                }
+            }));
+            const fileWatcher = vscode.workspace.createFileSystemWatcher(new vscode.RelativePattern(group.folder, '**/*.tl'));
+            subscriptions.push(fileWatcher);
+            const changed = (uri: vscode.Uri) => this.sessions.diskChanged({ uri: uri.toString(), path: uri.fsPath });
+            subscriptions.push(fileWatcher.onDidCreate(changed), fileWatcher.onDidDelete(changed), fileWatcher.onDidChange(changed));
+            const session: LanguageSession = {
+                isRunning: () => active.state === State.Running,
+                dispose,
+            };
+            this.reporter.output.appendLine(`[LSP] Starting ${command} in ${group.root}`);
+            await active.start();
+            started = true;
+            return session;
+        } catch (error) {
+            try { await dispose(); }
+            catch (cleanup) { throw new AggregateError([error, cleanup], `Language server startup failed: ${String(error)}; cleanup also failed.`, { cause: cleanup }); }
+            throw error;
+        }
     }
 
     refresh(force = false): Promise<void> { return this.sessions.refresh(force); }
