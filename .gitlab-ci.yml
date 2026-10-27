@@ -1,0 +1,56 @@
+# GitLab only verifies and packages the extension. Marketplace publication and
+# toolchain-release verification remain in the GitHub tag workflow, where their
+# credentials and platform runners are configured.
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+    - if: '$CI_COMMIT_BRANCH'
+    - if: '$CI_COMMIT_TAG'
+    - when: never
+
+stages:
+  - verify
+  - build
+
+default:
+  image: node:22-bookworm
+  interruptible: true
+  cache:
+    key:
+      files:
+        - pnpm-lock.yaml
+    paths:
+      - .pnpm-store/
+
+variables:
+  PNPM_STORE_DIR: '$CI_PROJECT_DIR/.pnpm-store'
+
+.node_job:
+  before_script:
+    - node --version
+    - npm --version
+    - npm install --global pnpm@11.25.0
+    - pnpm --version
+    - pnpm config set store-dir "$PNPM_STORE_DIR"
+    - pnpm install --frozen-lockfile
+
+verify:
+  extends: .node_job
+  stage: verify
+  script:
+    - pnpm run typecheck
+    - pnpm run lint
+    - pnpm run test:unit
+
+build_vsix:
+  extends: .node_job
+  stage: build
+  needs:
+    - verify
+  script:
+    - pnpm run package:all
+  artifacts:
+    name: 'teal-vscode-$CI_COMMIT_REF_SLUG'
+    expire_in: 30 days
+    paths:
+      - target/*.vsix

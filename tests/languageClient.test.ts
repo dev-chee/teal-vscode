@@ -22,6 +22,7 @@ let disposedWatchers = 0;
 const folder = { uri: { fsPath: tmpdir(), toString: () => pathToFileURL(tmpdir()).toString() }, name: 'fixture', index: 0 };
 let folders: Array<typeof folder> = [];
 const clientOptions: LanguageClientOptions[] = [];
+const serverOptions: Array<{ command?: string; args?: string[] }> = [];
 function fileUri(file: string) {
     const uri = { scheme: 'file', fsPath: file, query: '', fragment: '', toString: () => pathToFileURL(file).toString(), with: () => uri };
     return uri;
@@ -48,8 +49,9 @@ const vscode = {
 };
 class Client {
     state = 2;
-    constructor(_id: string, _name: string, _server: unknown, options: LanguageClientOptions) {
+    constructor(_id: string, _name: string, server: unknown, options: LanguageClientOptions) {
         if (fault === 'constructor') throw new Error('client construction failed');
+        serverOptions.push(server as { command?: string; args?: string[] });
         clientOptions.push(options);
     }
     onDidChangeState = noop;
@@ -69,12 +71,13 @@ loader._load = originalLoad;
 for (const failure of ['configuration', 'constructor', 'watcher', 'listener', 'start', 'none'] as const) {
     test(`language client releases staged executables after ${failure}`, async t => {
         const root = await mkdtemp(path.join(tmpdir(), 'teal-client-lifecycle-'));
-        const source = path.join(root, 'teal-lsp.exe');
+        const source = path.join(root, 'teal.exe');
         executableFile = source;
         await writeFile(source, 'fixture executable, never executed');
         entries = failure === 'configuration' ? [123] : [];
         fault = failure === 'configuration' || failure === 'none' ? undefined : failure;
         disposedClients = disposedWatchers = 0;
+        serverOptions.length = 0;
         const errors: string[] = [];
         const copies: string[] = [];
         const stage = executables.stageLanguageServerExecutable;
@@ -90,6 +93,7 @@ for (const failure of ['configuration', 'constructor', 'watcher', 'listener', 's
             if (failure === 'none') {
                 assert.deepEqual(errors, []);
                 assert.equal(await readFile(copies[0], 'utf8'), 'fixture executable, never executed');
+                assert.deepEqual(serverOptions[0]?.args, ['lsp']);
                 await clients.dispose();
                 assert.equal(disposedClients, 1);
                 assert.equal(disposedWatchers, 1);
@@ -119,7 +123,7 @@ test('existing clients map cross-root results to a child buffer opened after par
     await symlink(actual, alias, 'junction');
     await writeFile(path.join(actual, 'main.tl'), '');
     await writeFile(inner, '');
-    executableFile = path.join(directory, 'teal-lsp.exe');
+    executableFile = path.join(directory, 'teal.exe');
     await writeFile(executableFile, 'fixture executable, never executed');
     folders = [{ uri: fileUri(alias), name: 'parent', index: 0 }, { uri: fileUri(nested), name: 'child', index: 1 }];
     vscode.workspace.textDocuments.splice(0, documents.length, { uri: fileUri(main), languageId: 'teal', isClosed: false });

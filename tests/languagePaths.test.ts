@@ -72,3 +72,19 @@ test('an opened nested workspace document overrides the parent alias root fallba
         assert.equal(paths.toEditor(path.join(actual, 'not-open.tl')), path.join(alias, 'not-open.tl'));
     } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+test('duplicate path snapshots preserve the first editor identity', async () => {
+    const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-duplicate-paths-')));
+    try {
+        const actual = path.join(directory, 'real');
+        const alias = path.join(directory, 'alias');
+        await mkdir(actual);
+        await symlink(actual, alias, 'junction');
+        const realFile = path.join(actual, 'main.tl');
+        const aliasFile = path.join(alias, 'main.tl');
+        await writeFile(realFile, '');
+        const paths = await LanguagePaths.create(alias, [{ path: aliasFile }, { path: aliasFile }, { path: realFile }]);
+        assert.equal(paths.toCanonical(aliasFile), realFile);
+        assert.equal(paths.toEditor(realFile), aliasFile);
+    } finally { await rm(directory, { recursive: true, force: true }); }
+});

@@ -76,8 +76,8 @@ export class DebugAdapter implements vscode.DebugAdapterDescriptorFactory {
         return this.reporter.guard(async () => {
             const resource = session.workspaceFolder?.uri
                 ?? (session.configuration.request === 'launch' ? vscode.Uri.file(session.configuration.program) : undefined);
-            const command = await executable('teal-dap', resource);
-            return new vscode.DebugAdapterExecutable(command, [], { cwd: session.configuration.cwd ?? session.workspaceFolder?.uri.fsPath ?? path.dirname(command) });
+            const command = await executable('teal', resource);
+            return new vscode.DebugAdapterExecutable(command, ['dap'], { cwd: session.configuration.cwd ?? session.workspaceFolder?.uri.fsPath ?? path.dirname(command) });
         });
     }
 }

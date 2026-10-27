@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import Module, { createRequire } from 'node:module';
 import { link, mkdtemp, readFile, rename, rm, writeFile, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -6,6 +7,39 @@ import test from 'node:test';
 import { saveProgram } from '../src/documents';
 import { sameFilePath } from '../src/platform';
 import { prepareDebugConfiguration } from '../src/debugOptions';
+
+const executionLoader = Module as unknown as { _load(request: string, parent: NodeModule | undefined, isMain?: boolean): unknown };
+const originalExecutionLoad = executionLoader._load;
+const launched: Array<{ name: string; resource: unknown }> = [];
+class DebugAdapterExecutableFixture {
+    constructor(readonly command: string, readonly args: string[], readonly options: unknown) {}
+}
+executionLoader._load = (request, parent, isMain) => {
+    if (request === 'vscode') return { DebugAdapterExecutable: DebugAdapterExecutableFixture };
+    if (request === './environment' && parent?.filename.endsWith('execution.js')) {
+        return { executable: async (name: string, resource: unknown) => {
+            launched.push({ name, resource });
+            return '/toolchain/teal';
+        }, requireExecution() {} };
+    }
+    return originalExecutionLoad.call(Module, request, parent, isMain);
+};
+const { DebugAdapter } = createRequire(__filename)('../src/execution') as typeof import('../src/execution');
+executionLoader._load = originalExecutionLoad;
+
+test('debug adapter starts the unified CLI with the dap subcommand', async () => {
+    launched.length = 0;
+    const folder = { uri: { fsPath: '/workspace' } };
+    const adapter = new DebugAdapter({ guard: async <T>(action: () => Promise<T>) => action() } as import('../src/reporting').Reporter);
+    const descriptor = await adapter.createDebugAdapterDescriptor({
+        workspaceFolder: folder,
+        configuration: { request: 'launch', cwd: '/workspace', program: '/workspace/main.tl' },
+    } as never) as unknown as DebugAdapterExecutableFixture;
+    assert.deepEqual(launched, [{ name: 'teal', resource: folder.uri }]);
+    assert.equal(descriptor.command, '/toolchain/teal');
+    assert.deepEqual(descriptor.args, ['dap']);
+    assert.deepEqual(descriptor.options, { cwd: '/workspace' });
+});
 
 test('launch saves the file document even when a Git revision with the same path comes first', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'teal-launch-save-'));

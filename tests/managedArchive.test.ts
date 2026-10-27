@@ -11,7 +11,7 @@ test('managed archives reject traversal and absolute paths', () => {
 
 test('managed archives contain a single toolchain with runtime Teal sources', () => {
     assert.doesNotThrow(() => validateArchiveListing('bundle/teal\nbundle/runtime/\nbundle/runtime/packages/std/src/ui.tl'));
-    for (const extra of ['bundle/compiler.rs', 'bundle/std.tl', 'bundle/runtime/compiler.rs', 'source/compiler.rs', 'source.rs', 'bundle/teal/']) {
+    for (const extra of ['bundle/teal-lsp', 'bundle/teal-dap', 'bundle/compiler.rs', 'bundle/std.tl', 'bundle/runtime/compiler.rs', 'source/compiler.rs', 'source.rs', 'bundle/teal/']) {
         assert.throws(() => validateArchiveListing(`bundle/teal\n${extra}`), /Unexpected distribution archive entry/);
     }
     assert.throws(() => validateArchiveListing('bundle/teal\nbundle/teal'), /Unexpected distribution archive entry/);

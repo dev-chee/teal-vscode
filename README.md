@@ -1,4 +1,4 @@
-# Teal for Visual Studio Code
+# Teal for VSCode
 
 为 Teal 提供本地语言服务、终端运行和源码调试。面向 **Windows、Linux、macOS 的 9 个桌面目标，VS Code 1.91 或更新版本**。本地、WSL、Remote SSH、Dev Containers 与 Codespaces 的 Node.js 工作区宿主使用该宿主对应的原生工具链。
 
@@ -8,25 +8,25 @@
 
 `pnpm run package:all` 生成全部 9 个平台的 VSIX；`pnpm run package --target darwin-arm64` 生成单个平台包。`pnpm run package` 仍生成通用包，`pnpm run package:windows` 生成 Windows x64 包。
 
-插件不会在激活时静默下载工具链。可以先在 Teal 源码仓库构建：
+受信任工作区会在没有本地完整工具链时自动安装托管工具链；也可以先在 Teal 源码仓库构建：
 
 ```powershell
-cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-dap --bin teal-fmt
+cargo build --release --locked --package teal --bin teal
 ```
 
 在 VS Code 设置中搜索 `teal.toolchain.path`，填写构建输出的**绝对目录**，例如：
 
 ```json
 {
-    "teal.toolchain.path": "D:\\teal-lang\\target\\release"
+    "teal.toolchain.path": "d:\\teal\\target\\release"
 }
 ```
 
-请在 `D:\teal-lang` 中执行构建命令，且使用同次构建的四个工具。该目录应包含 `teal.exe`、`teal-lsp.exe`、`teal-dap.exe`、`teal-fmt.exe`。也可使用 Teal 分发目录，包含工具、`runtime/` 资源和标准包源码。使用集成终端调试时，工具链必须包含本项目配套的 DAP `console` 支持。
+请在 `d:\teal` 中执行构建命令。该目录应包含 `teal.exe`；语言服务、调试和格式化分别通过 `teal lsp`、`teal dap`、`teal fmt` 子命令提供。也可使用 Teal 分发目录，包含 `teal.exe`、`runtime/` 资源和标准包源码。使用集成终端调试时，工具链必须包含本项目配套的 DAP `console` 支持。
 
-配置为空时，按 PATH 顺序寻找第一个包含全部四项工具的目录；没有完整目录时使用第一个包含至少一项工具的目录。缺少工具仅停用对应功能，不跨目录拼接版本。显式目录无效时直接提示，不回退 PATH。PATH 中的空项或相对目录不参与查找；变更系统 PATH 后需要重启 VS Code。
+配置为空时，按 PATH 顺序寻找第一个包含可执行 `teal` 的目录，不跨目录拼接版本。显式目录无效时直接提示，不回退 PATH。PATH 中的空项或相对目录不参与查找；变更系统 PATH 后需要重启 VSCode。
 
-如果没有找到显式目录或完整 PATH 工具链，插件在受信任工作区自动安装托管工具链；也可执行 **Teal: 安装 Teal 工具链**。下载源为 `dev-chee/teal-vscode` 的公开 GitHub Releases，归档按当前宿主选择，并校验 GitHub 提供的 SHA-256 digest。归档附带 `runtime/` 运行资源和标准包 Teal 源码，必须包含完整性清单和以下四个入口：
+如果没有找到显式目录或 PATH 工具链，插件在受信任工作区自动安装托管工具链；也可执行 **Teal: 安装 Teal 工具链**。下载源为 `dev-chee/teal-vscode` 的公开 GitHub Releases，归档按当前宿主选择，并校验 GitHub 提供的 SHA-256 digest。归档附带 `teal`、`runtime/` 运行资源和标准包 Teal 源码，并必须包含完整性清单：
 
 | 平台 | 发行归档 |
 | --- | --- |
@@ -37,34 +37,34 @@ cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --b
 
 平台按扩展宿主的操作系统、架构和 libc/ARM ABI 选择；无法确认 ABI 时仍可配置本地工具链，但不会猜测托管归档。下载源尚未发布对应平台时，安装会明确失败，不下载其他架构代替。
 
-托管工具链安装到扩展宿主的全局存储目录。`teal.toolchain.path` 始终优先；空配置时优先使用完整 PATH 工具链，再使用已安装的托管工具链。`teal.toolchain.release` 默认为 `latest`，与 CI 共用分页规则，选择版本号最高且包含全部 9 平台归档的正式 `toolchain-vX.Y.Z` Release；固定标签也必须包含全部目标。重新执行安装会先解析 Release，再按解析版本复用缓存，避免 `latest` 永久停留旧版本。下载源必须提供对应平台归档及 SHA-256 digest。安装与缓存加载共用 CI 的分发校验：四个工具必须是非空普通文件，Unix 工具须可执行；根目录 `manifest.json` 覆盖工具、格式元数据和全部 `runtime/` 文件的相对路径、大小、SHA-256。标准包 `.tl`/`.tli`、配置、模板和资源随包分发；Rust 等宿主实现源码、构建输入、符号链接及清单外文件会被拒绝。坏包不会切换当前安装，损坏的托管缓存会被拒绝，可重新执行安装修复。
+托管工具链安装到扩展宿主的全局存储目录。`teal.toolchain.path` 始终优先；空配置时优先使用 PATH 工具链，再使用已安装的托管工具链。`teal.toolchain.release` 默认为 `latest`，与 CI 共用分页规则，选择版本号最高且包含全部 9 平台归档的正式 `toolchain-vX.Y.Z` Release；固定标签也必须包含全部目标。重新执行安装会先解析 Release，再按解析版本复用缓存，避免 `latest` 永久停留旧版本。下载源必须提供对应平台归档及 SHA-256 digest。安装与缓存加载共用 CI 的分发校验：`teal` 必须是非空普通文件，Unix 下须可执行；根目录 `manifest.json` 覆盖该可执行文件、格式元数据和全部 `runtime/` 文件的相对路径、大小、SHA-256。标准包 `.tl`/`.tli`、配置、模板和资源随包分发；Rust 等宿主实现源码、构建输入、符号链接及清单外文件会被拒绝。坏包不会切换当前安装，损坏的托管缓存会被拒绝，可重新执行安装修复。
 
 `teal.toolchain.autoUpdate` 默认为 `true`。插件激活时和每 6 小时检查托管版本，同宿主多窗口共享检查时间和安装锁；固定标签保持锁定。执行 **Teal: 检查并更新 Teal 工具链** 可立即检查，绕过节流和自动更新开关。显式路径和完整 PATH 始终优先；后台失败只写日志并保留旧版本。成功切换后刷新 LSP，已运行的程序和调试进程继续使用保留的旧目录。首次安装期间的工具调用等待准备完成。
 
-多根工作区按所属文件夹读取更新开关和固定版本，不同固定标签独立保存安装选择。缓存状态保留旧代次引用，另一窗口更新后仍可离线选择原来的固定版本。更新只刷新使用该版本的语言服务；新 LSP 启动失败会恢复本窗口的旧选择和语言服务，后续检查可重试已下载的候选目录。
+多根工作区按所属文件夹读取更新开关和固定版本，不同固定标签独立保存安装选择。缓存状态保留当前版本与最近三个旧代次引用，另一窗口在该保留窗口内仍可离线选择原来的固定版本；更早的固定版本会按需重新下载。更新只刷新使用该版本的语言服务；新 LSP 启动失败会恢复本窗口的旧选择和语言服务，后续检查可重试已下载的候选目录。
 
-安装及同标签修复使用独立代次目录；旧目录会保留，避免影响仍在运行的进程。新目录校验完成后，先写入并同步临时状态文件，再原子替换 `current.json`。提交前 I/O 失败会回滚本次候选目录，旧选择保持不变；状态替换报错时会读回确认，结果不能确认则保留候选数据。回滚清理失败会同时报告原始错误和清理错误，后续安装可使用新代次重试。
+安装及同标签修复使用独立代次目录；当前与最近三个旧代次会保留，未被状态引用且超过七天宽限期的目录会在后续成功安装后回收，避免长期占用磁盘。新目录校验完成后，先写入并同步临时状态文件，再原子替换 `current.json`。提交前 I/O 失败会回滚本次候选目录，旧选择保持不变；状态替换报错时会读回确认，结果不能确认则保留候选数据。回滚清理失败会同时报告原始错误和清理错误，后续安装可使用新代次重试。
 
 插件仅在受信任工作区启动进程。未受信任时仍可使用语法高亮、括号和代码片段。远程工作区中扩展运行在工作区宿主，工具链、源码路径和终端均位于该宿主。浏览器连接 Codespaces 时使用远程 Node.js 宿主；纯浏览器宿主和虚拟文件系统暂不支持原生进程。
 
 ## WSL 安装
 
-在连接到 WSL 的 VS Code 窗口中，把扩展安装到对应的 WSL 发行版。工具链也需要在 WSL 内构建：
+在连接到 WSL 的 VSCode 窗口中，把扩展安装到对应的 WSL 发行版。工具链也需要在 WSL 内构建：
 
 ```bash
 cd /mnt/d/teal
-cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --bin teal-dap --bin teal-fmt
+cargo build --release --locked --package teal --bin teal
 ```
 
 在 WSL 远程设置中配置：
 
 ```json
 {
-    "teal.toolchain.path": "/mnt/d/teal-lang/target/release"
+    "teal.toolchain.path": "/mnt/d/teal/target/release"
 }
 ```
 
-该目录必须包含具有执行权限的 Linux `teal`、`teal-lsp`、`teal-dap`、`teal-fmt`。WSL 配置使用 Linux 路径，不能填写 `D:\teal-lang` 或使用 Windows `.exe` 工具链。运行和集成终端调试均在 WSL 内执行；托管安装也发生在 WSL 扩展宿主内。
+该目录必须包含具有执行权限的 Linux `teal`；语言服务、调试和格式化使用它的 `lsp`、`dap`、`fmt` 子命令。WSL 配置使用 Linux 路径，不能填写 `d:\teal` 或使用 Windows `.exe` 工具链。运行和集成终端调试均在 WSL 内执行；托管安装也发生在 WSL 扩展宿主内。
 
 ## 编辑
 
@@ -72,11 +72,11 @@ cargo build --release --locked --package teal-lang --bin teal --bin teal-lsp --b
 
 无需工具链即可获得静态语法高亮：支持 `@optimization` 等配置属性、自定义及限定名属性、`reflect(...).@Attribute` 投影、函数和类型声明名、常量声明、命名空间、`self`、通配符 `_`，以及字符串插值中的变量和字段路径。实际颜色由主题决定；启用语义高亮后，语言服务器返回的分类可能覆盖静态颜色。
 
-提供补全、诊断、悬停、签名帮助、定义、引用、重命名、文档及工作区符号、格式化和语义高亮。语言行为完全由本地 `teal-lsp` 决定；格式化固定使用四空格和 LF，语法不完整时可能返回空编辑。
+提供补全、诊断、悬停、签名帮助、定义、引用、重命名、文档及工作区符号、格式化和语义高亮。语言行为完全由本地 `teal lsp` 决定；格式化固定使用四空格和 LF，语法不完整时可能返回空编辑。
 
-配套的 `teal-lsp` 区分属性、函数与方法、参数、字段、枚举成员、类型和泛型参数，并标记常量与声明；字符串、插值及转义继续使用静态高亮。服务端更新需要重新构建对应环境的 `teal-lsp`，然后执行 **Teal: 重启语言服务器**；仅更新扩展不会替换本地工具链。
+配套的 `teal lsp` 区分属性、函数与方法、参数、字段、枚举成员、类型和泛型参数，并标记常量与声明；字符串、插值及转义继续使用静态高亮。服务端更新需要重新构建对应环境的 `teal`，然后执行 **Teal: 重启语言服务器**；仅更新扩展不会替换本地工具链。
 
-Windows 本地启动语言服务器前会将 `teal-lsp.exe` 复制到临时目录再运行，因此 `teal-lang\target\release` 中的文件不会被语言服务器进程占用，构建期间可以直接替换它。
+Windows 本地启动语言服务器前会将 `teal.exe` 复制到临时目录后以 `lsp` 子命令运行，因此 `teal\target\release` 中的文件不会被语言服务器进程占用，构建期间可以直接替换它。
 
 `teal.lsp.entryFiles` 接受根分析文件数组，相对路径以所属工作区文件夹为基准；工作区外的文件使用父目录。留空时由服务端识别顶层 `fn main()` 或 `task main()`。使用现有 `entryFiles`，不使用已移除的 `entryPoints`。
 
@@ -140,7 +140,7 @@ Launch 支持 `tier`（`embedded`、`hosted`、`agentic`，省略时默认 `agen
 先使用同一工具链在目标环境启动 debuggee：
 
 ```powershell
-teal-dap --debuggee --listen 127.0.0.1:4711 --token YOUR_RANDOM_SECRET --program program.tl
+teal dap --debuggee --listen 127.0.0.1:4711 --token YOUR_RANDOM_SECRET --program program.tl
 ```
 
 然后使用以下配置，运行时输入对应 token：
@@ -177,7 +177,7 @@ pnpm run typecheck
 pnpm run lint
 pnpm run build
 pnpm run test:unit
-$env:TEAL_TOOLCHAIN_PATH = 'D:\teal-lang\target\release'
+$env:TEAL_TOOLCHAIN_PATH = 'd:\teal\target\release'
 $env:VSCODE_EXECUTABLE_PATH = 'C:\Program Files\Microsoft VS Code\Code.exe'
 pnpm test
 pnpm run package
@@ -188,7 +188,7 @@ pnpm run package
 在 WSL 中验证真实工具链：
 
 ```bash
-TEAL_TOOLCHAIN_PATH=/mnt/d/teal-lang/target/release pnpm run test:toolchain
+TEAL_TOOLCHAIN_PATH=/mnt/d/teal/target/release pnpm run test:toolchain
 ```
 
 `test:toolchain` 在全部目标的原生或模拟执行环境均可运行，覆盖 CLI 参数与输入、嵌套工作区 LSP 刷新、DAP 启动/暂停/继续；它不替代 VS Code 扩展宿主端到端测试。测试入口会重新编译并清理旧测试产物，避免已删除的测试继续运行。

@@ -6,8 +6,8 @@ import { parseSha256Digest, releaseAssetName, releaseApiUrl, validateAssetUrl, v
 test('managed toolchain release URLs and asset names are deterministic', () => {
     assert.equal(releaseApiUrl('latest'), 'https://api.github.com/repos/dev-chee/teal-vscode/releases?per_page=100&page=1');
     assert.equal(releaseApiUrl('v0.1.0'), 'https://api.github.com/repos/dev-chee/teal-vscode/releases/tags/v0.1.0');
-    assert.equal(releaseAssetName('teal', 'win32-x64'), 'teal-win32-x64.zip');
-    assert.equal(releaseAssetName('teal-lsp', 'linux-x64'), 'teal-linux-x64.tar.gz');
+    assert.equal(releaseAssetName('win32-x64'), 'teal-win32-x64.zip');
+    assert.equal(releaseAssetName('linux-x64'), 'teal-linux-x64.tar.gz');
 });
 
 test('managed toolchain requires HTTPS assets and valid SHA-256 digests', () => {
@@ -21,8 +21,8 @@ test('managed toolchain requires HTTPS assets and valid SHA-256 digests', () => 
 });
 
 test('Windows ARM64 uses ZIP and Unix targets use tar.gz', () => {
-    assert.equal(releaseAssetName('teal', 'win32-arm64'), 'teal-win32-arm64.zip');
+    assert.equal(releaseAssetName('win32-arm64'), 'teal-win32-arm64.zip');
     for (const target of ['darwin-arm64', 'linux-armhf', 'alpine-x64'] as const) {
-        assert.equal(releaseAssetName('teal', target), `teal-${target}.tar.gz`);
+        assert.equal(releaseAssetName(target), `teal-${target}.tar.gz`);
     }
 });

@@ -25,6 +25,9 @@ export class WorkspaceToolchains {
     private readonly applied = new Map<string, string>();
     private readonly blocked = new Set<string>();
     private queue: Promise<void> = Promise.resolve();
+    private pathToolchain: Promise<Awaited<ReturnType<typeof resolveToolchain>> | undefined> | undefined;
+    private documentRefresh: Promise<void> | undefined;
+    private documentRefreshQueued = false;
     private started = false;
     private stopped = false;
 
@@ -54,10 +57,15 @@ export class WorkspaceToolchains {
         return directory;
     }
 
+    /** PATH 属于扩展宿主进程；文档或文件夹事件不会改变它。 */
+    private localPathToolchain(): Promise<Awaited<ReturnType<typeof resolveToolchain>> | undefined> {
+        return this.pathToolchain ??= resolveToolchain('').catch(() => undefined);
+    }
+
     private async settings(resource?: vscode.Uri): Promise<UpdateSettings> {
         const config = vscode.workspace.getConfiguration('teal', resource);
         const configured = config.get<string>('toolchain.path', '').trim();
-        const fromPath = configured ? undefined : await resolveToolchain('').catch(() => undefined);
+        const fromPath = configured ? undefined : await this.localPathToolchain();
         const release = toolchainRelease(resource);
         if (!configured && !isCompleteToolchain(fromPath)) await this.load(release);
         return { trusted: vscode.workspace.isTrusted, supported: isSupported() && !!currentManagedToolchainTarget(),
@@ -67,13 +75,25 @@ export class WorkspaceToolchains {
 
     /** 与 LanguageClients 的分组键一致；本地路径及其他固定版本不参与此次切换。 */
     private async affectedKeys(release: string): Promise<string[]> {
-        const keys = new Set<string>();
+        const resources = new Map<string, vscode.Uri | undefined>();
+        const candidates: Array<{ key: string; scope: string }> = [];
         for (const document of vscode.workspace.textDocuments) {
             if (!isLocalTealDocument(document)) continue;
             const folder = vscode.workspace.getWorkspaceFolder(document.uri);
-            const settings = await this.settings(folder?.uri);
-            if (settings.release === release && !settings.local) {
-                keys.add((folder?.uri ?? vscode.Uri.file(path.dirname(document.uri.fsPath))).toString());
+            const resource = folder?.uri;
+            const scope = resource?.toString() ?? '';
+            resources.set(scope, resource);
+            candidates.push({
+                key: (resource ?? vscode.Uri.file(path.dirname(document.uri.fsPath))).toString(),
+                scope,
+            });
+        }
+        const settings = new Map(await Promise.all([...resources].map(async ([scope, resource]) => [scope, await this.settings(resource)] as const)));
+        const keys = new Set<string>();
+        for (const candidate of candidates) {
+            const current = settings.get(candidate.scope)!;
+            if (current.release === release && !current.local) {
+                keys.add(candidate.key);
             }
         }
         return [...keys].sort();
@@ -128,7 +148,7 @@ export class WorkspaceToolchains {
         } catch (error) { this.log(`[Toolchain activation] ${String(error)}`); }
     }
 
-    private entry(resource?: vscode.Uri): ToolchainUpdates {
+    private entryRecord(resource?: vscode.Uri): Entry {
         const key = resource?.toString() ?? '';
         let entry = this.entries.get(key);
         if (!entry) {
@@ -148,7 +168,11 @@ export class WorkspaceToolchains {
             entry.bootstrap = this.bootstrap(resource);
             entry.updates.start();
         }
-        return entry.updates;
+        return entry;
+    }
+
+    private entry(resource?: vscode.Uri): ToolchainUpdates {
+        return this.entryRecord(resource).updates;
     }
 
     private resources(): Array<vscode.Uri | undefined> {
@@ -159,7 +183,7 @@ export class WorkspaceToolchains {
 
     async start(): Promise<void> {
         this.started = true;
-        for (const resource of this.resources()) this.entry(resource);
+        for (const resource of this.resources()) this.entryRecord(resource);
         await Promise.all([...this.entries.values()].map(entry => entry.bootstrap));
     }
 
@@ -200,9 +224,33 @@ export class WorkspaceToolchains {
         return installed;
     }
 
+    private async refreshDocumentResources(): Promise<void> {
+        const resources = this.resources();
+        const bootstraps: Promise<void>[] = [];
+        for (const resource of resources) {
+            const entry = this.entryRecord(resource);
+            if (entry.bootstrap) bootstraps.push(entry.bootstrap);
+        }
+        await Promise.all(bootstraps);
+    }
+
     async documentsChanged(): Promise<void> {
-        for (const resource of this.resources()) this.entry(resource);
-        await Promise.all(this.resources().map(resource => this.bootstrap(resource)));
+        this.documentRefreshQueued = true;
+        if (!this.documentRefresh) {
+            const refresh = (async () => {
+                while (this.documentRefreshQueued && !this.stopped) {
+                    this.documentRefreshQueued = false;
+                    await this.refreshDocumentResources();
+                }
+            })();
+            this.documentRefresh = refresh;
+            void refresh.then(() => {
+                if (this.documentRefresh === refresh) this.documentRefresh = undefined;
+            }, () => {
+                if (this.documentRefresh === refresh) this.documentRefresh = undefined;
+            });
+        }
+        await this.documentRefresh;
     }
 
     async configurationChanged(event?: vscode.ConfigurationChangeEvent): Promise<void> {
@@ -224,6 +272,7 @@ export class WorkspaceToolchains {
 
     async dispose(): Promise<void> {
         this.stopped = true;
+        await this.documentRefresh?.catch(() => {});
         await Promise.all([...this.entries.values()].map(entry => entry.updates.dispose()));
         await this.queue;
         this.entries.clear();

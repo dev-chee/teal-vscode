@@ -1,8 +1,8 @@
-import { createHash } from 'node:crypto';
 import type { ManagedToolchainTarget } from './platform';
 import distribution from './toolchain-targets.json';
 import { createReleasePolicy } from './toolchainReleaseCore.cjs';
 import { validateToolchainArchiveListing } from './toolchainDistributionCore.cjs';
+import { parseSha256Digest as parseDigest, validateAssetUrl as validateUrl, verifySha256 as verifyDigest } from './toolchainTransferCore.cjs';
 
 const releasePolicy = createReleasePolicy(distribution);
 export const selectToolchainRelease = releasePolicy.selectRelease;
@@ -19,25 +19,21 @@ export function releaseApiUrl(release: string): string {
     return releasePolicy.apiUrl(release);
 }
 
-export function releaseAssetName(tool: string, target: ManagedToolchainTarget): string {
-    void tool;
+/** 每个平台只有一个包含 `teal` 和 runtime 资源的归档。 */
+export function releaseAssetName(target: ManagedToolchainTarget): string {
     return releasePolicy.archiveName(target);
 }
 
 export function parseSha256Digest(digest: string | undefined): string | undefined {
-    if (!digest) return undefined;
-    const normalized = digest.trim().toLowerCase();
-    const value = normalized.startsWith('sha256:') ? normalized.slice('sha256:'.length) : normalized;
-    return /^[0-9a-f]{64}$/.test(value) ? value : undefined;
+    return parseDigest(digest);
 }
 
 export function verifySha256(bytes: Uint8Array, expected: string): boolean {
-    return createHash('sha256').update(bytes).digest('hex') === expected.toLowerCase();
+    return verifyDigest(bytes, expected);
 }
 
 export function validateAssetUrl(url: string): void {
-    const parsed = new URL(url);
-    if (parsed.protocol !== 'https:') throw new Error('The Teal toolchain asset URL must use HTTPS.');
+    validateUrl(url);
 }
 
 export function validateArchiveListing(listing: string): void {

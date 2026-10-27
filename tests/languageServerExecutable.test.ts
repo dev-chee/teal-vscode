@@ -9,7 +9,7 @@ import { disposeLanguageServerExecutables, languageServerEnvironment, releaseLan
 test('Windows stages the language server outside the source directory', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-lsp-test-'));
     try {
-        const source = path.join(root, 'target', 'release', 'teal-lsp.exe');
+        const source = path.join(root, 'target', 'release', 'teal.exe');
         await mkdir(path.dirname(source), { recursive: true });
         await writeFile(source, 'original');
         const staged = await stageLanguageServerExecutable(source, 'win32');
@@ -31,7 +31,7 @@ test('Windows stages the language server outside the source directory', async ()
 test('Windows preserves a packaged runtime directory for the staged server', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-lsp-runtime-test-'));
     try {
-        const source = path.join(root, 'teal-lsp.exe');
+        const source = path.join(root, 'teal.exe');
         await writeFile(source, 'fixture');
         await mkdir(path.join(root, 'runtime'));
         assert.deepEqual(await languageServerEnvironment(source, 'win32', {}), {
@@ -45,13 +45,13 @@ test('Windows preserves a packaged runtime directory for the staged server', asy
 });
 
 test('non-Windows hosts use the configured language server directly', async () => {
-    const source = path.join(tmpdir(), 'teal-lsp');
+    const source = path.join(tmpdir(), 'teal');
     assert.equal(await stageLanguageServerExecutable(source, 'linux'), source);
 });
 
 test('Windows retries staging after a shared temporary directory creation failure', async (t) => {
     const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-lsp-retry-'));
-    const source = path.join(root, 'teal-lsp.exe');
+    const source = path.join(root, 'teal.exe');
     await writeFile(source, 'retry fixture');
     const failure = Object.assign(new Error('temporary directory creation failed'), { code: 'EACCES' });
     const create = t.mock.method(fs, 'mkdtemp', async () => { throw failure; });
@@ -78,7 +78,7 @@ test('Windows retries staging after a shared temporary directory creation failur
 
 test('Windows recreates an idle staging directory removed by temporary file cleanup', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-lsp-removed-'));
-    const source = path.join(root, 'teal-lsp.exe');
+    const source = path.join(root, 'teal.exe');
     await writeFile(source, 'cleanup fixture');
     try {
         const first = await stageLanguageServerExecutable(source, 'win32');

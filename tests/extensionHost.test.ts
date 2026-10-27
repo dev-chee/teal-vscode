@@ -584,8 +584,8 @@ export function run(): Promise<void> {
             });
             try {
                 await writeFile(source, 'fn main() {\n    let value = 1;\n    print(value);\n}\n');
-                const child = spawn(path.join(process.env.TEAL_TOOLCHAIN_PATH!, executableName('teal-dap')), [
-                    '--debuggee', '--listen', `127.0.0.1:${port}`, '--token', token, '--program', source, '--stop-on-entry',
+                const child = spawn(path.join(process.env.TEAL_TOOLCHAIN_PATH!, executableName('teal')), [
+                    'dap', '--debuggee', '--listen', `127.0.0.1:${port}`, '--token', token, '--program', source, '--stop-on-entry',
                 ], { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });
                 child.stderr.setEncoding('utf8');
                 child.stderr.on('data', (chunk: string) => stderr.push(chunk));

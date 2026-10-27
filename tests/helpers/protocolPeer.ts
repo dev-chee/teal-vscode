@@ -26,8 +26,8 @@ export class ProtocolPeer {
     private sequence = 0;
     private failure?: Error;
 
-    constructor(executable: string, cwd: string) {
-        this.process = spawn(executable, [], { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
+    constructor(executable: string, cwd: string, args: readonly string[] = []) {
+        this.process = spawn(executable, args, { cwd, stdio: ['pipe', 'pipe', 'pipe'] });
         this.process.stderr.resume();
         this.process.on('error', (error) => this.fail(error));
         this.process.on('exit', () => this.fail(new Error('Protocol process exited')));

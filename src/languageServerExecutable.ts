@@ -8,7 +8,7 @@ const stagedExecutables = new Set<string>();
 
 /**
  * Windows keeps a running executable open, which prevents Cargo from replacing
- * target/release/teal-lsp.exe during the next build. Run a private copy instead.
+ * target/release/teal.exe during the next build. Run a private copy instead.
  */
 export async function stageLanguageServerExecutable(source: string, platform: NodeJS.Platform = process.platform): Promise<string> {
     if (platform !== 'win32') return source;
@@ -19,7 +19,7 @@ export async function stageLanguageServerExecutable(source: string, platform: No
     });
     // Temporary-file cleanup may remove the directory between server runs.
     await mkdir(directory, { recursive: true });
-    const staged = path.join(directory, `${sequence++}-teal-lsp.exe`);
+    const staged = path.join(directory, `${sequence++}-teal.exe`);
     await copyFile(source, staged);
     stagedExecutables.add(staged);
     return staged;

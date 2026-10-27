@@ -28,6 +28,6 @@ await runTests({
     '--disable-extensions',
     workspace,
     '--user-data-dir', profile,
-    '--extensions-dir', path.join(os.tmpdir(), `teal-vscode-extensions-${process.pid}`),
+    '--extensions-dir', path.join(os.tmpdir(), `teal-vscode-${process.pid}`),
   ],
 });

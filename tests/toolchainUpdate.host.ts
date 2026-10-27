@@ -29,7 +29,7 @@ export async function run(): Promise<void> {
         globalThis.fetch = async input => {
             if (String(input).startsWith('https://api.github.com/repos/dev-chee/teal-vscode/releases')) {
                 return Response.json([{ id: version, tag_name: `toolchain-v${version}.0.0`, assets: toolchainTargets.map(target => ({
-                    name: releaseAssetName('teal', target), browser_download_url: 'https://fixture.invalid/toolchain', digest: `sha256:${digest}`, size: bytes.length,
+                    name: releaseAssetName(target), browser_download_url: 'https://fixture.invalid/toolchain', digest: `sha256:${digest}`, size: bytes.length,
                 })) }]);
             }
             assert.equal(String(input), 'https://fixture.invalid/toolchain');

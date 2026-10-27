@@ -15,17 +15,17 @@ import { ProtocolPeer } from './helpers/protocolPeer';
 
 const toolchain = process.env.TEAL_TOOLCHAIN_PATH;
 assert.ok(toolchain, 'Set TEAL_TOOLCHAIN_PATH to rebuilt native Teal executables');
-const tool = (name: string) => path.join(toolchain, executableName(name));
+const teal = path.join(toolchain, executableName('teal'));
 const document = (file: string) => ({ path: file, uri: pathToFileURL(file).toString() });
 
 test('CLI receives generated run arguments, Unicode arguments and synchronous terminal input', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'teal-cli-integration-'));
     try {
-        assert.equal(Object.keys((await resolveToolchain(toolchain)).tools).length, 4);
+        assert.deepEqual(Object.keys((await resolveToolchain(toolchain)).tools), ['teal']);
         const program = path.join(root, '中文 with spaces.tl');
         await writeFile(program, 'task main() { let args = argv(); if args[0] != "a b" { exit(17); } if args[1] != "中文" { exit(19); } if input() != "stdin value" { exit(18); } }\n');
         await writeFile(path.join(root, 'permissions.toml'), '[permissions]\nrules = []\n');
-        const result = spawnSync(tool('teal'), runArguments(program, ['--tier', 'hosted', '--permission-file', 'permissions.toml'], ['a b', '中文']), { cwd: root, input: 'stdin value\n', encoding: 'utf8', timeout: Number(process.env.TEAL_TEST_TIMEOUT_MS ?? 20_000) });
+        const result = spawnSync(teal, runArguments(program, ['--tier', 'hosted', '--permission-file', 'permissions.toml'], ['a b', '中文']), { cwd: root, input: 'stdin value\n', encoding: 'utf8', timeout: Number(process.env.TEAL_TEST_TIMEOUT_MS ?? 20_000) });
         assert.ifError(result.error);
         assert.equal(result.status, 0, result.stderr);
     } finally { await rm(root, { recursive: true, force: true }); }
@@ -45,7 +45,7 @@ test('session coordination refreshes a real parent LSP after saving a nested dep
         groups: () => groups,
         report: (error) => errors.push(error),
         start: async (group) => {
-            const peer = new ProtocolPeer(tool('teal-lsp'), group.root);
+            const peer = new ProtocolPeer(teal, group.root, ['lsp']);
             peers.push({ group, peer });
             try {
                 await peer.request('initialize', { rootUri: pathToFileURL(group.root).toString(), capabilities: {}, initializationOptions: { entryFiles: [] } });
@@ -76,7 +76,7 @@ test('session coordination refreshes a real parent LSP after saving a nested dep
 
 test('normalized launch options reach real DAP and support stop, stack trace and continue', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'teal-dap-integration-'));
-    const peer = new ProtocolPeer(tool('teal-dap'), root);
+    const peer = new ProtocolPeer(teal, root, ['dap']);
     let child: ChildProcess | undefined;
     try {
         const program = path.join(root, 'main.tl');

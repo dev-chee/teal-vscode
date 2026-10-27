@@ -1,11 +1,40 @@
 /** 安装器与 CI 共用工具链和 runtime 校验；完成前不得发布安装状态或启动工具。 */
 const { access, lstat, readFile, readdir, realpath } = require('node:fs/promises');
 const { constants } = require('node:fs');
+const { createReadStream } = require('node:fs');
 const { createHash } = require('node:crypto');
 const path = require('node:path');
 const distribution = require('./toolchain-targets.json');
-const tools = ['teal', 'teal-lsp', 'teal-dap', 'teal-fmt', 'teal-c', 'teal-test', 'teal-auth', 'teal-model', 'teal-audit'];
+// 发行版只携带一个 teal 可执行文件；LSP、DAP 和格式化由它的子命令提供。
+const tools = ['teal'];
 const requiredRuntime = ['runtime/packages/catalog.toml', 'runtime/packages/std/package.toml', 'runtime/packages/std/builtins.tli'];
+const validationConcurrency = 16;
+const hashingConcurrency = 8;
+
+async function mapLimit(values, limit, action) {
+    const output = new Array(values.length);
+    let next = 0;
+    await Promise.all(Array.from({ length: Math.min(limit, values.length) }, async () => {
+        for (;;) {
+            const index = next++;
+            if (index >= values.length) return;
+            output[index] = await action(values[index]);
+        }
+    }));
+    return output;
+}
+
+async function hashFile(file) {
+    const hash = createHash('sha256');
+    let size = 0;
+    await new Promise((resolve, reject) => {
+        const stream = createReadStream(file);
+        stream.on('data', chunk => { size += chunk.length; hash.update(chunk); });
+        stream.once('error', reject);
+        stream.once('end', resolve);
+    });
+    return { size, sha256: hash.digest('hex') };
+}
 
 /** Teal 源码及运行资源可分发，Rust、构建输入和隐藏缓存不可分发。 */
 function allowedRuntimeFile(name) {
@@ -52,7 +81,7 @@ async function verifyToolchainDistribution(directory, target) {
     if (!Object.hasOwn(distribution.targets, target)) throw new Error(`Unsupported target: ${target}`);
     const root = await realpath(directory);
     const windows = target.startsWith('win32-');
-    for (const tool of ['teal', 'teal-lsp', 'teal-dap', 'teal-fmt']) {
+    for (const tool of tools) {
         const file = path.join(root, tool + (windows ? '.exe' : ''));
         const info = await lstat(file);
         if (!info.isFile() || !info.size) throw new Error(`Invalid tool: ${tool}`);
@@ -68,6 +97,7 @@ async function verifyToolchainDistribution(directory, target) {
         throw new Error('Missing or invalid distribution manifest.');
     }
     const seen = new Set();
+    const directories = new Set();
     for (const file of manifest.files) {
         // 同一清单保护工具和外置运行脚本，不允许借 runtime 路径附带宿主实现。
         if (typeof file?.path !== 'string' || (!allowed.has(file.path) && !allowedRuntimeFile(file.path)) || seen.has(file.path)) {
@@ -77,16 +107,19 @@ async function verifyToolchainDistribution(directory, target) {
         if (!Number.isSafeInteger(file.size) || file.size < 0 || (!file.size && allowed.has(file.path)) || typeof file.sha256 !== 'string' || !/^[a-f\d]{64}$/i.test(file.sha256)) {
             throw new Error(`Invalid distribution metadata: ${file.path}`);
         }
-        if (!(await lstat(path.join(root, file.path))).isFile()) throw new Error(`Invalid distribution file: ${file.path}`);
+        const parts = file.path.split('/');
+        for (let index = 1; index < parts.length; index++) directories.add(parts.slice(0, index).join('/'));
     }
+    await mapLimit(manifest.files, validationConcurrency, async file => {
+        if (!(await lstat(path.join(root, file.path))).isFile()) throw new Error(`Invalid distribution file: ${file.path}`);
+    });
     const actual = new Set();
     async function visit(directory, relative = '') {
         for (const name of await readdir(directory)) {
             const file = relative ? `${relative}/${name}` : name;
             const resource = path.join(directory, name);
             const info = await lstat(resource);
-            if (info.isDirectory() && (file === 'runtime' || file.startsWith('runtime/'))
-                && [...seen].some(candidate => candidate.startsWith(`${file}/`))) {
+            if (info.isDirectory() && directories.has(file)) {
                 await visit(resource, file);
             } else if (info.isFile() && (file === 'manifest.json' || seen.has(file))) {
                 actual.add(file);
@@ -103,13 +136,13 @@ async function verifyToolchainDistribution(directory, target) {
         || ![...seen].some(name => name.startsWith('runtime/packages/') && name.endsWith('.tl'))) {
         throw new Error('Missing runtime resources or Teal sources.');
     }
-    for (const file of manifest.files) {
+    await mapLimit(manifest.files, hashingConcurrency, async file => {
         const resource = path.join(root, file.path);
-        const content = await readFile(resource);
-        if (content.length !== file.size || createHash('sha256').update(content).digest('hex') !== file.sha256.toLowerCase()) {
+        const content = await hashFile(resource);
+        if (content.size !== file.size || content.sha256 !== file.sha256.toLowerCase()) {
             throw new Error(`Distribution digest mismatch: ${file.path}`);
         }
-    }
+    });
     return root;
 }
 

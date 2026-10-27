@@ -25,7 +25,7 @@ export async function run(): Promise<void> {
     let starts = 0;
     const closing = new Set<Promise<void>>();
     childProcess.spawn = ((...args: Parameters<typeof childProcess.spawn>) => {
-        const server = String(args[0]).includes('teal-lsp');
+        const server = Array.isArray(args[1]) && args[1][0] === 'lsp';
         if (server) {
             starts++;
             if (failOnce) {
@@ -57,7 +57,7 @@ export async function run(): Promise<void> {
         let version = 1, downloads = 0;
         globalThis.fetch = async input => {
             if (String(input).startsWith('https://api.github.com/')) return Response.json([{ id: version, tag_name: `toolchain-v${version}.0.0`, assets: toolchainTargets.map(target => ({
-                name: releaseAssetName('teal', target), browser_download_url: 'https://fixture.invalid/toolchain', digest: `sha256:${digest}`, size: bytes.length,
+                name: releaseAssetName(target), browser_download_url: 'https://fixture.invalid/toolchain', digest: `sha256:${digest}`, size: bytes.length,
             })) }]);
             assert.equal(String(input), 'https://fixture.invalid/toolchain');
             downloads++; return new Response(bytes);
@@ -83,17 +83,17 @@ export async function run(): Promise<void> {
             throw new Error('No running LSP answered hover after toolchain activation');
         };
         await hover();
-        const oldCommand = await executable('teal-lsp', document.uri);
+        const oldCommand = await executable('teal', document.uri);
         const before = starts;
         assert.ok(before > 0, 'the initial real server must have started');
         version = 2; failOnce = true;
         await vscode.commands.executeCommand('teal.checkToolchainUpdates');
         assert.equal(failOnce, false, 'the process startup failure must be exercised');
-        assert.equal(await executable('teal-lsp', document.uri), oldCommand);
+        assert.equal(await executable('teal', document.uri), oldCommand);
         await hover();
         assert.equal(starts, before + 2, 'one failed new process and one recovered old process');
         await vscode.commands.executeCommand('teal.checkToolchainUpdates');
-        const newCommand = await executable('teal-lsp', document.uri);
+        const newCommand = await executable('teal', document.uri);
         assert.notEqual(newCommand, oldCommand);
         await hover();
         assert.equal(downloads, 2, 'retry reuses the validated candidate without downloading it again');
@@ -106,7 +106,7 @@ export async function run(): Promise<void> {
         failOnce = true;
         await activate(context);
         assert.equal(failOnce, false);
-        assert.equal(await executable('teal-lsp', document.uri), oldCommand);
+        assert.equal(await executable('teal', document.uri), oldCommand);
         await hover();
         console.log('PASS: real LSP failure restores the old server, explicit retry reuses the candidate, and cached startup recovers offline');
     } finally {

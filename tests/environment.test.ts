@@ -25,17 +25,13 @@ test('local toolchains and explicit errors do not wait for managed downloads', a
         process.env.PATH = root;
         environment.setManagedToolchainProvider(async () => { preparations++; throw new Error('unrelated managed download'); });
         configured = root;
-        const lsp = path.join(root, executableName('teal-lsp'));
-        await writeFile(lsp, 'fixture executable, never executed'); await chmod(lsp, 0o755);
-        assert.equal(await environment.executable('teal-lsp'), lsp, 'explicit partial toolchains remain usable');
+        const cli = path.join(root, executableName('teal'));
+        await writeFile(cli, 'fixture executable, never executed'); await chmod(cli, 0o755);
+        assert.equal(await environment.executable('teal'), cli, 'an explicit single-binary toolchain remains usable');
         configured = path.join(root, 'absent');
-        await assert.rejects(environment.executable('teal-lsp'), /does not exist/);
+        await assert.rejects(environment.executable('teal'), /does not exist/);
         configured = '';
-        for (const tool of ['teal', 'teal-dap', 'teal-fmt']) {
-            const file = path.join(root, executableName(tool));
-            await writeFile(file, 'fixture executable, never executed'); await chmod(file, 0o755);
-        }
-        assert.equal(await environment.executable('teal-lsp'), lsp, 'complete PATH toolchains retain priority');
+        assert.equal(await environment.executable('teal'), cli, 'PATH toolchains retain priority');
         assert.equal(preparations, 0);
     } finally {
         configured = ''; environment.setManagedToolchainProvider(undefined);
@@ -44,24 +40,22 @@ test('local toolchains and explicit errors do not wait for managed downloads', a
     }
 });
 
-test('partial PATH waits for the matching resource and rechecks trust after preparation', async () => {
+test('legacy PATH entries wait for the managed single-binary toolchain and recheck trust after preparation', async () => {
     const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-environment-managed-')));
     const searchPath = process.env.PATH;
     try {
         const partial = path.join(root, 'partial'), managed = path.join(root, 'managed');
         await mkdir(partial); await mkdir(managed);
-        const cli = path.join(partial, executableName('teal'));
-        await writeFile(cli, 'partial fixture'); await chmod(cli, 0o755);
-        for (const tool of ['teal', 'teal-lsp', 'teal-dap', 'teal-fmt']) {
-            const file = path.join(managed, executableName(tool));
-            await writeFile(file, 'managed fixture'); await chmod(file, 0o755);
-        }
+        const legacy = path.join(partial, executableName('teal-lsp'));
+        await writeFile(legacy, 'legacy fixture'); await chmod(legacy, 0o755);
+        const cli = path.join(managed, executableName('teal'));
+        await writeFile(cli, 'managed fixture'); await chmod(cli, 0o755);
         process.env.PATH = partial;
         const resource = { fsPath: path.join(root, 'project/main.tl') } as import('vscode').Uri;
         environment.setManagedToolchainProvider(async uri => { assert.equal(uri, resource); return managed; });
-        assert.equal(await environment.executable('teal-lsp', resource), path.join(managed, executableName('teal-lsp')));
+        assert.equal(await environment.executable('teal', resource), cli);
         environment.setManagedToolchainProvider(async () => { workspace.isTrusted = false; return managed; });
-        await assert.rejects(environment.executable('teal-lsp', resource), /Trust this workspace/);
+        await assert.rejects(environment.executable('teal', resource), /Trust this workspace/);
     } finally {
         workspace.isTrusted = true; environment.setManagedToolchainProvider(undefined);
         process.env.PATH = searchPath;

@@ -7,11 +7,11 @@
   "license": "SEE LICENSE IN LICENSE",
   "repository": {
     "type": "git",
-    "url": "https://github.com/dev-chee/teal-vscode-extension.git"
+    "url": "https://github.com/dev-chee/teal-vscode.git"
   },
-  "homepage": "https://github.com/dev-chee/teal-vscode-extension#readme",
+  "homepage": "https://github.com/dev-chee/teal-vscode#readme",
   "bugs": {
-    "url": "https://github.com/dev-chee/teal-vscode-extension/issues"
+    "url": "https://github.com/dev-chee/teal-vscode/issues"
   },
   "engines": {
     "vscode": "^1.91.0"
@@ -176,7 +176,7 @@
           "type": "string",
           "default": "",
           "scope": "machine-overridable",
-          "description": "工具链绝对目录：Windows 包含 teal.exe、teal-lsp.exe、teal-dap.exe、teal-fmt.exe；Linux/macOS 包含可执行的 teal、teal-lsp、teal-dap、teal-fmt。远程工作区填写扩展宿主上的路径。留空从 PATH 选择同目录工具链；显式目录无效时不回退。"
+          "description": "工具链绝对目录：Windows 包含 teal.exe；Linux/macOS 包含可执行的 teal。语言服务、调试和格式化通过 teal 的 lsp、dap、fmt 子命令启动。远程工作区填写扩展宿主上的路径。留空从 PATH 选择同目录工具链；显式目录无效时不回退。"
         },
         "teal.toolchain.release": {
           "type": "string",

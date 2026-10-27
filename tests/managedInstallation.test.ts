@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, utimes, writeFile } from 'node:fs/promises';
 import fs from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
@@ -10,6 +10,7 @@ import type { ExtensionContext } from 'vscode';
 import { currentManagedToolchainTarget, installManagedToolchain, loadManagedToolchain, updateManagedToolchain } from '../src/managedToolchain';
 import { executableName, toolchainTargets } from '../src/platform';
 import { releaseAssetName } from '../src/toolchainDownloadCore';
+import { writeRuntimeFixture } from './helpers/toolchainFixture.cjs';
 
 const target = currentManagedToolchainTarget();
 assert.ok(target, 'installation regressions require a supported native host');
@@ -21,7 +22,7 @@ async function archive(root: string, name: string, defect?: Defect) {
     const fixture = path.join(root, name);
     const bundle = path.join(fixture, 'bundle');
     await mkdir(bundle, { recursive: true });
-    for (const tool of ['teal', 'teal-lsp', 'teal-dap', 'teal-fmt']) {
+    for (const tool of ['teal']) {
         const file = path.join(bundle, executableName(tool));
         await writeFile(file, defect === 'empty-tool' && tool === 'teal' ? '' : 'fixture executable');
         await chmod(file, defect === 'non-executable' && tool === 'teal' ? 0o600 : 0o755);
@@ -32,25 +33,15 @@ async function archive(root: string, name: string, defect?: Defect) {
         path: defect === 'unsafe-path' ? '../outside.txt' : 'toolchain.json', size: content.length,
         sha256: defect === 'corrupt-metadata' ? '0'.repeat(64) : digest(content),
     }] };
-    for (const tool of ['teal', 'teal-lsp', 'teal-dap', 'teal-fmt']) {
+    for (const tool of ['teal']) {
         const file = executableName(tool);
         const bytes = await readFile(path.join(bundle, file));
         manifest.files.push({ path: file, size: bytes.length, sha256: digest(bytes) });
     }
-    const resources = {
-        'runtime/packages/catalog.toml': 'packages = ["std"]\n',
-        'runtime/packages/std/package.toml': 'modules = ["ui.tl"]\n',
-        'runtime/packages/std/builtins.tli': 'builtin global {}\n',
-        'runtime/packages/std/src/ui.tl': 'pub fn label() -> string { return "label"; }\n',
+    await writeRuntimeFixture(bundle, manifest.files, {
         'runtime/config/config.toml': '',
         'runtime/templates/config.toml': '[permissions]\nrules = []\n',
-    };
-    for (const [file, source] of Object.entries(resources)) {
-        await mkdir(path.dirname(path.join(bundle, file)), { recursive: true });
-        await writeFile(path.join(bundle, file), source);
-        const bytes = Buffer.from(source);
-        manifest.files.push({ path: file, size: bytes.length, sha256: digest(bytes) });
-    }
+    });
     await writeFile(path.join(bundle, 'manifest.json'), JSON.stringify(manifest));
     if (defect === 'missing-runtime') await rm(path.join(bundle, 'runtime/packages/std/src/ui.tl'));
     if (defect === 'corrupt-runtime') await writeFile(path.join(bundle, 'runtime/packages/std/src/ui.tl'), 'changed source');
@@ -77,7 +68,7 @@ async function archive(root: string, name: string, defect?: Defect) {
     assert.equal(result.status, 0, result.stderr);
     const bytes = await readFile(packed);
     return { bytes, release: { id: parseInt(digest(Buffer.from(name)).slice(0, 8), 16) + 1, tag_name: `toolchain-v${/v(\d+)$/.exec(name)?.[1] ?? 2}.0.0`, assets: toolchainTargets.map(platform => ({
-        name: releaseAssetName('teal', platform), browser_download_url: `https://fixture.invalid/${name}`,
+        name: releaseAssetName(platform), browser_download_url: `https://fixture.invalid/${name}`,
         digest: `sha256:${digest(bytes)}`, size: bytes.length,
     })) } };
 }
@@ -548,5 +539,31 @@ test('independent windows retain a fixed legacy cache after another window updat
         assert.equal(await loadManagedToolchain(reopenedWindow, 'latest', [latest!.directory]), pinned.directory);
         assert.equal(network, before, 'offline cache selection must never fetch');
         assert.equal(await readFile(path.join(pinned.directory, 'toolchain.json'), 'utf8'), 'metadata v1');
+    } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+test('successful updates compact history and prune expired unreferenced generations', async t => {
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-generation-retention-')));
+    try {
+        let selected = await archive(root, 'v1');
+        t.mock.method(globalThis, 'fetch', async (input: string | URL | Request) => String(input).startsWith('https://api.github.com/')
+            ? Response.json([selected.release]) : new Response(selected.bytes));
+        const ctx = context(root);
+        const generations = [];
+        for (let version = 1; version <= 5; version++) {
+            selected = await archive(root, `v${version}`);
+            const installed = await updateManagedToolchain(ctx, 'latest', nativeTarget, { force: true });
+            assert.ok(installed);
+            generations.push(installed);
+            if (version === 1) {
+                const retired = new Date(Date.now() - 8 * 24 * 60 * 60_000);
+                await utimes(installed.directory, retired, retired);
+            }
+        }
+        const state = JSON.parse(await readFile(statePath(ctx), 'utf8')) as { release: string; previous: Array<{ release: string; directory: string }> };
+        assert.equal(state.release, 'toolchain-v5.0.0');
+        assert.deepEqual(state.previous.map(record => record.release), ['toolchain-v4.0.0', 'toolchain-v3.0.0', 'toolchain-v2.0.0']);
+        await assert.rejects(stat(generations[0].directory), { code: 'ENOENT' });
+        for (const generation of generations.slice(1)) await stat(generation.directory);
     } finally { await rm(root, { recursive: true, force: true }); }
 });

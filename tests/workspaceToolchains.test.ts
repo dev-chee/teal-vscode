@@ -13,6 +13,7 @@ let configurations: Array<{ release: string; autoUpdate: boolean }>;
 let cached: Map<string, string>;
 let candidate: string;
 let metadata: string[];
+let pathResolutions: number;
 const api = {
     Uri: { file: uri, joinPath: (base: Uri, ...parts: string[]) => uri(path.join(base.fsPath, ...parts)) },
     workspace: {
@@ -30,7 +31,7 @@ const original = loader._load;
 loader._load = (request, parent, isMain) => {
     if (request === 'vscode') return api;
     if (request === './environment') return { isSupported: () => true };
-    if (request === './toolchain') return { resolveToolchain: async () => undefined, isCompleteToolchain: () => false };
+    if (request === './toolchain') return { resolveToolchain: async () => { pathResolutions++; return undefined; }, isCompleteToolchain: () => false };
     if (request === './managedToolchain') return {
         currentManagedToolchainTarget: () => 'linux-x64',
         loadManagedToolchain: async (_storage: unknown, release = 'latest', excluded: readonly string[] = []) => {
@@ -52,7 +53,7 @@ loader._load = original;
 function fixture(refresh: (force: boolean, keys?: readonly string[]) => Promise<void>) {
     configurations = [{ release: 'latest', autoUpdate: false }, { release: 'toolchain-v2.0.0', autoUpdate: false }];
     cached = new Map([['latest', '/old'], ['toolchain-v2.0.0', '/pinned']]);
-    candidate = '/new'; metadata = [];
+    candidate = '/new'; metadata = []; pathResolutions = 0;
     return new WorkspaceToolchains({ globalStorageUri: uri('/storage') }, refresh, () => {});
 }
 
@@ -64,6 +65,16 @@ test('folder opt-out suppresses automatic checks while keeping each configured c
         assert.equal(await manager.directory(folders[1]), '/pinned');
         await new Promise(resolve => setTimeout(resolve, 20));
         assert.deepEqual(metadata, []);
+    } finally { await manager.dispose(); }
+});
+
+test('document discovery shares the PATH lookup and coalesces repeated refreshes', async () => {
+    const manager = fixture(async () => {});
+    try {
+        await manager.start();
+        assert.equal(pathResolutions, 1, 'all workspace scopes share one extension-host PATH lookup');
+        await Promise.all([manager.documentsChanged(), manager.documentsChanged(), manager.documentsChanged()]);
+        assert.equal(pathResolutions, 1, 'document events must not rescan PATH after startup');
     } finally { await manager.dispose(); }
 });
 

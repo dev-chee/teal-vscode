@@ -1,10 +1,10 @@
-import { createHash } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { appendFile, mkdir, mkdtemp, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { promisify, parseArgs } from 'node:util';
 import { archiveName, distribution, readRelease, targets } from './toolchain-release.mjs';
 import { validateToolchainArchiveListing, validateToolchainArchiveTypes, verifyToolchainDistribution } from '../src/toolchainDistributionCore.cjs';
+import { downloadVerifiedAsset } from '../src/toolchainTransferCore.cjs';
 
 const exec = promisify(execFile);
 const { values } = parseArgs({ options: { target: { type: 'string' }, release: { type: 'string', default: 'latest' }, resolve: { type: 'boolean' } } });
@@ -17,13 +17,7 @@ if (values.resolve) {
     const target = values.target;
     const name = archiveName(target);
     const asset = release.assets.find((asset) => asset.name === name);
-    if (!/^sha256:[a-f\d]{64}$/i.test(asset.digest ?? '')) throw new Error(`${name} is missing a GitHub SHA-256 digest.`);
-    if (new URL(asset.browser_download_url).protocol !== 'https:') throw new Error('Asset URL must use HTTPS.');
-    if (asset.size > 512 * 1024 * 1024) throw new Error(`${name} is too large.`);
-    const response = await fetch(asset.browser_download_url);
-    if (!response.ok) throw new Error(`Download ${name}: HTTP ${response.status}`);
-    const bytes = Buffer.from(await response.arrayBuffer());
-    if (bytes.length > 512 * 1024 * 1024 || createHash('sha256').update(bytes).digest('hex') !== asset.digest.slice(7).toLowerCase()) throw new Error(`${name}: SHA-256 verification failed.`);
+    if (!asset) throw new Error(`${name} is missing from ${release.tag_name}.`);
     const root = path.resolve('target/toolchains', target);
     await mkdir(root, { recursive: true });
     // 归档和解压目录均按本次运行隔离，旧文件不能补足新包，也不覆盖仍在使用的旧目录。
@@ -31,7 +25,7 @@ if (values.resolve) {
     let publicationAttempted = false;
     try {
         const archive = path.join(verification, name);
-        await writeFile(archive, bytes);
+        await downloadVerifiedAsset(asset, archive, { headers: { Accept: 'application/octet-stream', 'User-Agent': 'teal-vscode' } });
         const listing = await exec('tar', ['-tf', archive], { maxBuffer: 4 * 1024 * 1024 });
         const types = await exec('tar', ['-tvf', archive], { maxBuffer: 4 * 1024 * 1024 });
         validateToolchainArchiveTypes(types.stdout);

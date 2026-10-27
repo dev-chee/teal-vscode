@@ -1,21 +1,23 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdir, open, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
 import type { ManagedToolchainTarget } from './platform';
 import { parseManagedState, type ManagedState } from './managedState';
 import { currentToolchainTarget } from './hostPlatform';
-import { parseSha256Digest, readToolchainRelease, releaseAssetName, validateArchiveListing, validateAssetUrl, verifySha256, type ReleaseAsset } from './toolchainDownloadCore';
+import { readToolchainRelease, releaseAssetName, validateArchiveListing, type ReleaseAsset } from './toolchainDownloadCore';
 import { inspectToolchain, isCompleteToolchain, toolNames } from './toolchain';
 import { validateToolchainArchiveTypes, verifyToolchainDistribution } from './toolchainDistributionCore.cjs';
 import { compareToolchainVersions } from './toolchainReleaseCore.cjs';
+import { downloadVerifiedAsset } from './toolchainTransferCore.cjs';
 import distribution from './toolchain-targets.json';
 import { withManagedLock } from './managedLock';
 
 const managedDirectoryName = 'managed-toolchain';
-const maxAssetBytes = 512 * 1024 * 1024;
+const retainedPreviousGenerations = 3;
+const retiredGenerationGraceMs = 7 * 24 * 60 * 60_000;
 const execFileAsync = promisify(execFile);
 export type ManagedToolchainStorage = Pick<vscode.ExtensionContext, 'globalStorageUri'>;
 
@@ -37,22 +39,6 @@ async function fetchRelease(release: string, signal?: AbortSignal): Promise<Rele
     const info = await readToolchainRelease(release, undefined, globalThis.fetch, signal) as ReleaseInfo;
     if (!Number.isSafeInteger(info.id) || info.id <= 0) throw new Error('Invalid toolchain Release ID.');
     return info;
-}
-
-async function downloadAsset(asset: ReleaseAsset, signal?: AbortSignal): Promise<Uint8Array> {
-    validateAssetUrl(asset.browser_download_url);
-    if (asset.size !== undefined && asset.size > maxAssetBytes) throw new Error(`The Teal toolchain asset ${asset.name} is too large.`);
-    const response = await fetch(asset.browser_download_url, {
-        headers: { Accept: 'application/octet-stream', 'User-Agent': 'teal-vscode-extension' },
-        signal: signal ? AbortSignal.any([signal, AbortSignal.timeout(300_000)]) : AbortSignal.timeout(300_000),
-    });
-    if (!response.ok) throw new Error(`Unable to download ${asset.name} (${response.status} ${response.statusText}).`);
-    const bytes = new Uint8Array(await response.arrayBuffer());
-    if (bytes.byteLength > maxAssetBytes) throw new Error(`The Teal toolchain asset ${asset.name} is too large.`);
-    const digest = parseSha256Digest(asset.digest);
-    if (!digest) throw new Error(`The Teal toolchain asset ${asset.name} has no valid SHA-256 digest.`);
-    if (!verifySha256(bytes, digest)) throw new Error(`The SHA-256 digest for ${asset.name} does not match.`);
-    return bytes;
 }
 
 async function extractArchive(archive: string, destination: string): Promise<void> {
@@ -92,6 +78,20 @@ async function readManagedRecords(context: ManagedToolchainStorage): Promise<Man
             return true;
         });
     } catch { return []; }
+}
+
+/** 仅回收已脱离状态、且超过宽限期的本宿主代次，避免影响刚切换的进程。 */
+async function pruneRetiredInstallations(root: string, retained: ReadonlySet<string>): Promise<void> {
+    const installations = path.join(root, 'installations');
+    const cutoff = Date.now() - retiredGenerationGraceMs;
+    for (const entry of await readdir(installations, { withFileTypes: true }).catch(() => [])) {
+        if (!entry.isDirectory()) continue;
+        const directory = path.join(installations, entry.name);
+        if (retained.has(directory)) continue;
+        const metadata = await stat(directory).catch(() => undefined);
+        if (!metadata || metadata.mtimeMs > cutoff) continue;
+        await rm(directory, { recursive: true, force: true }).catch(() => {});
+    }
 }
 
 async function readManagedState(context: ManagedToolchainStorage, release = 'latest', excluded: readonly string[] = []): Promise<ManagedState | undefined> {
@@ -179,7 +179,7 @@ async function installLocked(
     const latest = (release.trim() || 'latest').toLowerCase() === 'latest';
     if (existing && existing.target === target && (latest && compareToolchainVersions(existing.release, releaseInfo.tag_name) === 1
         || existing.release === releaseInfo.tag_name && existing.repository === distribution.repository && existing.releaseId === releaseInfo.id)) return existing;
-    const archiveName = releaseAssetName('teal', target);
+    const archiveName = releaseAssetName(target);
     const archive = releaseInfo.assets.find((asset) => asset.name === archiveName);
     if (!archive) throw new Error(`The release ${releaseInfo.tag_name} does not contain ${archiveName}.`);
 
@@ -188,13 +188,17 @@ async function installLocked(
     // 每次安装独立成代，避免修复同标签时删除仍被其他窗口或进程使用的目录。
     const finalDirectory = path.join(root, 'installations', `${target}-${installationId}`);
     const state: ManagedState = { directory: finalDirectory, release: releaseInfo.tag_name, target, repository: distribution.repository, releaseId: releaseInfo.id };
+    let retainedDirectories = new Set<string>();
     let publicationAttempted = false;
     let committed = false;
     try {
         await mkdir(staging, { recursive: true });
         const archivePath = path.join(staging, archive.name);
         report?.(`Downloading ${archive.name}…`);
-        await writeFile(archivePath, await downloadAsset(archive, options.signal));
+        await downloadVerifiedAsset(archive, archivePath, {
+            headers: { Accept: 'application/octet-stream', 'User-Agent': 'teal-vscode' },
+            signal: options.signal,
+        });
         const extracted = path.join(staging, 'contents');
         await mkdir(extracted, { recursive: true });
         await extractArchive(archivePath, extracted);
@@ -209,7 +213,10 @@ async function installLocked(
         const file = await open(temporaryState, 'wx', 0o600);
         try {
             // 选择与历史引用一次原子发布，供旧窗口固定版本及 LSP 失败回滚使用。
-            const previous = (await readManagedRecords(context)).filter(record => record.directory !== state.directory);
+            const previous = (await readManagedRecords(context))
+                .filter(record => record.directory !== state.directory)
+                .slice(0, retainedPreviousGenerations);
+            retainedDirectories = new Set([state.directory, ...previous.map(record => record.directory)]);
             await file.writeFile(JSON.stringify({ ...state, previous }, null, 2), 'utf8');
             await file.sync();
         } catch (error) {
@@ -241,7 +248,10 @@ async function installLocked(
         throw error;
     } finally {
         // 提交之后的临时文件清理失败不能把已成功的安装报告为失败。
-        if (committed) await rm(staging, { recursive: true, force: true }).catch(() => {});
+        if (committed) {
+            await rm(staging, { recursive: true, force: true }).catch(() => {});
+            await pruneRetiredInstallations(root, retainedDirectories).catch(() => {});
+        }
     }
 }
 

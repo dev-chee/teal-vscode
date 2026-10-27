@@ -39,9 +39,9 @@ test('libc detection requires positive runtime evidence', () => {
 });
 
 test('native executable naming follows the workspace host', () => {
-    assert.equal(executableName('teal-lsp', 'win32'), 'teal-lsp.exe');
-    assert.equal(executableName('teal-lsp', 'linux'), 'teal-lsp');
-    assert.equal(executableName('teal-dap', 'darwin'), 'teal-dap');
+    assert.equal(executableName('teal', 'win32'), 'teal.exe');
+    assert.equal(executableName('teal', 'linux'), 'teal');
+    assert.equal(executableName('teal', 'darwin'), 'teal');
 });
 
 test('CI runtime architecture and ABI match the requested distribution', () => {

@@ -4,7 +4,7 @@ import { CloseAction, ErrorAction, LanguageClient, State, type LanguageClientOpt
 import { stringArray } from './configuration';
 import { isLocalTealDocument } from './documents';
 import { executable, isSupported } from './environment';
-import { LanguagePaths } from './languagePaths';
+import { LanguagePaths, resolveDocumentPaths, type ResolvedDocumentPaths } from './languagePaths';
 import { LanguageDiagnostics } from './languageDiagnostics';
 import { LanguageSessions, type LanguageGroup, type LanguageSession } from './languageSessions';
 import { languageServerEnvironment, releaseLanguageServerExecutable, stageLanguageServerExecutable } from './languageServerExecutable';
@@ -13,6 +13,8 @@ import type { Reporter } from './reporting';
 interface Group extends LanguageGroup {
     folder: vscode.WorkspaceFolder;
     documents: { uri: string; path: string }[];
+    allDocuments: { path: string }[];
+    resolvePaths(): Promise<ResolvedDocumentPaths>;
 }
 
 function globLiteral(value: string): string {
@@ -41,13 +43,16 @@ export class LanguageClients {
 
     private groups(): Group[] {
         if (!isSupported() || !vscode.workspace.isTrusted) return [];
+        const allDocuments = vscode.workspace.textDocuments.filter(isLocalTealDocument).map(document => ({ path: document.uri.fsPath }));
+        let pathSnapshot: Promise<ResolvedDocumentPaths> | undefined;
+        const resolvePaths = () => pathSnapshot ??= resolveDocumentPaths(allDocuments);
         const groups = new Map<string, Group>();
         for (const document of vscode.workspace.textDocuments) {
             if (!isLocalTealDocument(document)) continue;
             const parent = vscode.Uri.file(path.dirname(document.uri.fsPath));
             const folder = vscode.workspace.getWorkspaceFolder(document.uri) ?? { uri: parent, name: path.basename(parent.fsPath), index: 0 };
             const key = folder.uri.toString();
-            const group = groups.get(key) ?? { key, root: folder.uri.fsPath, folder, documents: [] };
+            const group = groups.get(key) ?? { key, root: folder.uri.fsPath, folder, documents: [], allDocuments, resolvePaths };
             group.documents.push({ uri: document.uri.toString(), path: document.uri.fsPath });
             groups.set(key, group);
         }
@@ -57,7 +62,7 @@ export class LanguageClients {
     private async start(group: Group): Promise<LanguageSession> {
         const config = vscode.workspace.getConfiguration('teal', group.folder.uri);
         const entryFiles = stringArray(config.get('lsp.entryFiles', []), 'teal.lsp.entryFiles').map((file) => path.resolve(group.root, file));
-        const sourceCommand = await executable('teal-lsp', group.folder.uri);
+        const sourceCommand = await executable('teal', group.folder.uri);
         const command = await stageLanguageServerExecutable(sourceCommand);
         const diagnostics = new LanguageDiagnostics<vscode.Uri, vscode.Diagnostic>(group.key, file => this.sessions.owner(file));
         let clientPaths: LanguagePaths | undefined;
@@ -86,8 +91,8 @@ export class LanguageClients {
             // 跨工作区结果也优先复用已打开的缓冲区；本会话文档优先于其他别名。
             const paths = await LanguagePaths.create(group.root, [
                 ...group.documents,
-                ...vscode.workspace.textDocuments.filter(isLocalTealDocument).map(document => ({ path: document.uri.fsPath })),
-            ]);
+                ...group.allDocuments,
+            ], await group.resolvePaths());
             clientPaths = paths;
             this.paths.set(group.key, paths);
             const activePaths = (file: string) => this.paths.get(this.sessions.owner(file) ?? group.key) ?? paths;
@@ -116,7 +121,7 @@ export class LanguageClients {
                     },
                 },
             };
-            const active = new LanguageClient('teal', `Teal (${group.folder.name})`, { command, args: [], options: { cwd: group.root, env: environment } }, options);
+            const active = new LanguageClient('teal', `Teal (${group.folder.name})`, { command, args: ['lsp'], options: { cwd: group.root, env: environment } }, options);
             client = active;
             subscriptions.push(active.onDidChangeState((event) => {
                 if (event.newState === State.Stopped && started && !stopping) {

@@ -1,6 +1,7 @@
 import * as vscode from 'vscode';
 import { isSupported, requireExecution, setManagedToolchainProvider } from './environment';
 import { DebugAdapter, DebugConfigurations, debugFile, runFile } from './execution';
+import { isLocalTealDocument } from './documents';
 import { LanguageClients } from './languageClient';
 import { disposeLanguageServerExecutables } from './languageServerExecutable';
 import { Reporter } from './reporting';
@@ -21,7 +22,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const configuration = new DebugConfigurations();
     context.subscriptions.push(
         output,
-        vscode.workspace.onDidOpenTextDocument(() => { void updater.documentsChanged().catch(error => output.appendLine(`[Toolchain activation] ${String(error)}`)); }),
+        vscode.workspace.onDidOpenTextDocument(document => {
+            if (isLocalTealDocument(document)) void updater.documentsChanged().catch(error => output.appendLine(`[Toolchain activation] ${String(error)}`));
+        }),
         vscode.workspace.onDidGrantWorkspaceTrust(() => configurationChanged()),
         vscode.workspace.onDidChangeWorkspaceFolders(() => configurationChanged()),
         vscode.workspace.onDidChangeConfiguration(event => {
