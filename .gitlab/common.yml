@@ -1,6 +1,5 @@
 # 三个 Runner 都是 x64；其余目标消费 Teal 仓库的交叉构建结果。
 variables:
-  PNPM_STORE_DIR: '$CI_PROJECT_DIR/.pnpm-store'
   TEAL_RUNNER_TAG_LINUX: linux
   TEAL_RUNNER_TAG_MACOS: macos
   TEAL_RUNNER_TAG_WINDOWS: windows
@@ -12,21 +11,20 @@ cache:
     files: [pnpm-lock.yaml]
   paths: [.pnpm-store/]
 
+# CI_PROJECT_DIR 仅在 Runner 任务中可用；在脚本内解析，避免父子流水线转发时丢失路径。
 .node_unix:
   before_script:
     - node --version
     - npm --version
     - npm install --global pnpm@11.25.0
-    - pnpm config set store-dir "$PNPM_STORE_DIR"
-    - pnpm install --frozen-lockfile
+    - pnpm install --frozen-lockfile --store-dir "$CI_PROJECT_DIR/.pnpm-store"
 
 .node_windows:
   before_script:
     - node --version
     - npm --version
     - npm install --global pnpm@11.25.0
-    - pnpm config set store-dir $env:PNPM_STORE_DIR
-    - pnpm install --frozen-lockfile
+    - pnpm install --frozen-lockfile --store-dir "$env:CI_PROJECT_DIR/.pnpm-store"
 
 .linux_job:
   extends: .node_unix
