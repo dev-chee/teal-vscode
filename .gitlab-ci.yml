@@ -1,56 +1,74 @@
-# GitLab only verifies and packages the extension. Marketplace publication and
-# toolchain-release verification remain in the GitHub tag workflow, where their
-# credentials and platform runners are configured.
+# release 分支构建成功后自动打 tag；tag 不触发第二次发布流水线。
+include:
+  - local: .gitlab/common.yml
+
 workflow:
   rules:
     - if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
-    - if: '$CI_COMMIT_BRANCH'
-    - if: '$CI_COMMIT_TAG'
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^release(\/|$)/'
     - when: never
 
-stages:
-  - verify
-  - build
+stages: [verify, build]
 
-default:
-  image: node:22-bookworm
-  interruptible: true
-  cache:
-    key:
-      files:
+.ci_rules:
+  rules: &ci_rules
+    - &merge_request_rule
+      if: '$CI_PIPELINE_SOURCE == "merge_request_event"'
+      changes: &ci_paths
+        - .gitlab-ci.yml
+        - .gitlab/**
+        - .vscodeignore
+        - package.json
         - pnpm-lock.yaml
-    paths:
-      - .pnpm-store/
-
-variables:
-  PNPM_STORE_DIR: '$CI_PROJECT_DIR/.pnpm-store'
-
-.node_job:
-  before_script:
-    - node --version
-    - npm --version
-    - npm install --global pnpm@11.25.0
-    - pnpm --version
-    - pnpm config set store-dir "$PNPM_STORE_DIR"
-    - pnpm install --frozen-lockfile
+        - tsconfig*.json
+        - eslint.config.mjs
+        - language-configuration.json
+        - syntaxes/**
+        - snippets/**
+        - src/**
+        - scripts/**
+        - tests/**
+    - &default_branch_rule
+      if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+      changes: *ci_paths
+    - when: never
 
 verify:
-  extends: .node_job
+  extends: .linux_job
   stage: verify
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^release(\/|$)/'
+    - *merge_request_rule
+    - *default_branch_rule
+    - when: never
   script:
     - pnpm run typecheck
     - pnpm run lint
     - pnpm run test:unit
 
 build_vsix:
-  extends: .node_job
+  extends: .linux_job
   stage: build
-  needs:
-    - verify
+  needs: [verify]
+  rules: *ci_rules
   script:
     - pnpm run package:all
   artifacts:
     name: 'teal-vscode-$CI_COMMIT_REF_SLUG'
     expire_in: 30 days
-    paths:
-      - target/*.vsix
+    paths: [target/*.vsix]
+
+# 锁覆盖整个子流水线；只锁发布 job 会让并发构建选择相同的新版本。
+release:
+  stage: build
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "push" && $CI_COMMIT_BRANCH =~ /^release(\/|$)/'
+    - when: never
+  resource_group: vscode-release
+  trigger:
+    include:
+      - local: .gitlab/release.yml
+    strategy: depend
+    forward:
+      pipeline_variables: true

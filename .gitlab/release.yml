@@ -1,0 +1,147 @@
+include:
+  - local: .gitlab/common.yml
+
+workflow:
+  rules:
+    - if: '$CI_PIPELINE_SOURCE == "parent_pipeline" && $CI_COMMIT_BRANCH =~ /^release(\/|$)/'
+    - when: never
+
+stages: [prepare, build, publish]
+
+variables:
+  # 最近版本标签和同一提交的已发布标签都需要完整历史。
+  GIT_DEPTH: '0'
+
+prepare_release:
+  extends: .linux_job
+  stage: prepare
+  script:
+    - git fetch --tags origin
+    - node scripts/gitlab-release.mjs prepare
+  artifacts:
+    expire_in: 30 days
+    paths: [target/release.json]
+
+.release_package:
+  stage: build
+  timeout: 60m
+  needs:
+    - job: prepare_release
+      artifacts: true
+  artifacts:
+    name: 'teal-vscode-$CI_COMMIT_SHORT_SHA-$DIST_TARGET'
+    expire_in: 30 days
+    paths: [target/*.vsix]
+
+.release_unix_package:
+  extends: .release_package
+  script:
+    - node scripts/gitlab-release.mjs apply-version
+    - node scripts/gitlab-toolchain.mjs --target "$DIST_TARGET"
+    - node scripts/package.mjs --target "$DIST_TARGET" --toolchain-path-file target/toolchain-path.txt --release-plan-file target/release.json
+
+.release_unix_native_package:
+  extends: .release_package
+  script:
+    - node scripts/gitlab-release.mjs apply-version
+    - node scripts/gitlab-toolchain.mjs --target "$DIST_TARGET"
+    - export TEAL_TOOLCHAIN_PATH="$(cat target/toolchain-path.txt)"
+    - node scripts/test-release.mjs --target "$DIST_TARGET"
+    - node scripts/package.mjs --target "$DIST_TARGET" --toolchain-path-file target/toolchain-path.txt --release-plan-file target/release.json
+
+.release_windows_package:
+  extends: .release_package
+  script:
+    - node scripts/gitlab-release.mjs apply-version
+    - node scripts/gitlab-toolchain.mjs --target $env:DIST_TARGET
+    - node scripts/package.mjs --target $env:DIST_TARGET --toolchain-path-file target/toolchain-path.txt --release-plan-file target/release.json
+
+.release_windows_native_package:
+  extends: .release_package
+  script:
+    - node scripts/gitlab-release.mjs apply-version
+    - node scripts/gitlab-toolchain.mjs --target $env:DIST_TARGET
+    - $env:TEAL_TOOLCHAIN_PATH = (Get-Content -Raw target/toolchain-path.txt).Trim()
+    - node scripts/test-release.mjs --target $env:DIST_TARGET
+    - node scripts/package.mjs --target $env:DIST_TARGET --toolchain-path-file target/toolchain-path.txt --release-plan-file target/release.json
+
+build_release_win32_x64:
+  extends: [.release_windows_native_package, .windows_job]
+  variables:
+    DIST_TARGET: win32-x64
+
+build_release_win32_arm64:
+  extends: [.release_windows_package, .windows_job]
+  variables:
+    DIST_TARGET: win32-arm64
+
+build_release_linux_x64:
+  extends: [.release_unix_native_package, .linux_job]
+  variables:
+    DIST_TARGET: linux-x64
+
+build_release_linux_arm64:
+  extends: [.release_unix_package, .linux_job]
+  variables:
+    DIST_TARGET: linux-arm64
+
+build_release_linux_armhf:
+  extends: [.release_unix_package, .linux_job]
+  variables:
+    DIST_TARGET: linux-armhf
+
+build_release_alpine_x64:
+  extends: [.release_unix_package, .linux_job]
+  variables:
+    DIST_TARGET: alpine-x64
+
+build_release_alpine_arm64:
+  extends: [.release_unix_package, .linux_job]
+  variables:
+    DIST_TARGET: alpine-arm64
+
+build_release_darwin_x64:
+  extends: [.release_unix_native_package, .macos_job]
+  variables:
+    DIST_TARGET: darwin-x64
+
+build_release_darwin_arm64:
+  extends: [.release_unix_package, .macos_job]
+  variables:
+    DIST_TARGET: darwin-arm64
+
+# 全部目标成功后才打 tag；标注标签记录插件 SHA、版本和 Teal 构建快照。
+# 发布凭据仅提供给 marketplace 环境；父流水线持有锁直到此 job 完成。
+publish_marketplace:
+  extends: .linux_job
+  stage: publish
+  # 与父流水线使用不同的锁；直接重试子 job 时也串行，且不会与父锁互相等待。
+  resource_group: marketplace-publish
+  environment:
+    name: marketplace
+  needs:
+    - job: prepare_release
+      artifacts: true
+    - job: build_release_win32_x64
+      artifacts: true
+    - job: build_release_win32_arm64
+      artifacts: true
+    - job: build_release_linux_x64
+      artifacts: true
+    - job: build_release_linux_arm64
+      artifacts: true
+    - job: build_release_linux_armhf
+      artifacts: true
+    - job: build_release_alpine_x64
+      artifacts: true
+    - job: build_release_alpine_arm64
+      artifacts: true
+    - job: build_release_darwin_x64
+      artifacts: true
+    - job: build_release_darwin_arm64
+      artifacts: true
+  script:
+    - node scripts/gitlab-release.mjs apply-version
+    - node scripts/check-marketplace-release.mjs
+    - node scripts/gitlab-release.mjs tag
+    - node scripts/publish.mjs

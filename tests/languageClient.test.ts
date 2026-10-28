@@ -151,3 +151,43 @@ test('existing clients map cross-root results to a child buffer opened after par
         await rm(directory, { recursive: true, force: true });
     }
 });
+
+test('diagnostics from a later linked child remain visible through its editor path', async () => {
+    const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-client-linked-child-')));
+    const documents = [...vscode.workspace.textDocuments];
+    const parent = path.join(directory, 'long-parent-workspace');
+    const actual = path.join(directory, 'x');
+    const alias = path.join(parent, 'linked-child');
+    await mkdir(parent); await mkdir(actual);
+    await symlink(actual, alias, 'junction');
+    const main = path.join(parent, 'main.tl'), inner = path.join(alias, 'inner.tl');
+    await writeFile(main, ''); await writeFile(inner, '');
+    executableFile = path.join(directory, 'teal.exe');
+    await writeFile(executableFile, 'fixture executable, never executed');
+    folders = [{ uri: fileUri(parent), name: 'parent', index: 0 }, { uri: fileUri(alias), name: 'child', index: 1 }];
+    vscode.workspace.textDocuments.splice(0, documents.length, { uri: fileUri(main), languageId: 'teal', isClosed: false });
+    clientOptions.length = 0;
+    fault = undefined; entries = [];
+    const errors: unknown[] = [];
+    const clients = new LanguageClients({ report: (error: unknown) => { errors.push(error); }, output: { appendLine() {} } } as unknown as Reporter);
+    try {
+        await clients.refresh();
+        vscode.workspace.textDocuments.push({ uri: fileUri(inner), languageId: 'teal', isClosed: false });
+        await clients.refresh();
+        assert.equal(clientOptions.length, 2, 'the original parent client remains alive');
+        const child = clientOptions[1];
+        const editorUri = child.uriConverters!.protocol2Code(pathToFileURL(path.join(actual, 'inner.tl')).href);
+        assert.equal(editorUri.fsPath, inner);
+        const diagnostic = { message: 'child compiler error' } as import('vscode').Diagnostic;
+        let published: readonly import('vscode').Diagnostic[] | undefined;
+        await child.middleware!.handleDiagnostics!(editorUri, [diagnostic], (_uri, diagnostics) => { published = diagnostics; });
+        assert.deepEqual(published, [diagnostic]);
+        assert.deepEqual(errors, []);
+    } finally {
+        await clients.dispose();
+        await executables.disposeLanguageServerExecutables();
+        folders = [];
+        vscode.workspace.textDocuments.splice(0, vscode.workspace.textDocuments.length, ...documents);
+        await rm(directory, { recursive: true, force: true });
+    }
+});

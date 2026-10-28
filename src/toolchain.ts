@@ -54,19 +54,29 @@ export async function resolveToolchain(configuredPath: string, searchPath = proc
     throw new Error('No Teal toolchain found. Set teal.toolchain.path to a directory containing the teal executable.');
 }
 
-/** Resolve explicit configuration first, then PATH, then the managed installation. */
-export async function resolveToolchainWithManaged(configuredPath: string, managedPath?: string, searchPath = process.env.PATH ?? ''): Promise<Toolchain> {
+/** Resolve explicit configuration first, then PATH, then verified fallback directories in order. */
+export async function resolveToolchainWithFallbacks(
+    configuredPath: string,
+    fallbackPaths: readonly (string | undefined)[],
+    searchPath = process.env.PATH ?? '',
+): Promise<Toolchain> {
     if (configuredPath.trim()) return resolveToolchain(configuredPath, searchPath);
 
     let pathToolchain: Toolchain | undefined;
     try { pathToolchain = await resolveToolchain('', searchPath); } catch { /* try managed installation below */ }
     if (isCompleteToolchain(pathToolchain)) return pathToolchain;
 
-    if (managedPath) {
+    for (const directory of fallbackPaths) {
+        if (!directory) continue;
         try {
-            const managed = await resolveToolchain(managedPath, '');
-            if (isCompleteToolchain(managed)) return managed;
-        } catch { /* retain the existing PATH error below */ }
+            const fallback = await resolveToolchain(directory, '');
+            if (isCompleteToolchain(fallback)) return fallback;
+        } catch { /* Try the next verified fallback directory. */ }
     }
     throw new Error('No Teal toolchain found. Run Teal: Install Toolchain or set teal.toolchain.path to a directory containing the teal executable.');
+}
+
+/** 保留托管工具链调用面；新的回退来源由 resolveToolchainWithFallbacks 按顺序处理。 */
+export async function resolveToolchainWithManaged(configuredPath: string, managedPath?: string, searchPath = process.env.PATH ?? ''): Promise<Toolchain> {
+    return resolveToolchainWithFallbacks(configuredPath, [managedPath], searchPath);
 }

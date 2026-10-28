@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
-import { mkdir, open, readFile, readdir, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { mkdir, open, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
 import { promisify } from 'node:util';
 import * as path from 'node:path';
 import * as vscode from 'vscode';
@@ -96,10 +96,11 @@ async function pruneRetiredInstallations(root: string, retained: ReadonlySet<str
 
 async function readManagedState(context: ManagedToolchainStorage, release = 'latest', excluded: readonly string[] = []): Promise<ManagedState | undefined> {
     const tag = release.trim() || 'latest';
+    const excludedDirectories = new Set(await Promise.all(excluded.map(directory => realpath(directory).catch(() => directory))));
     for (const value of await readManagedRecords(context)) try {
-        if (excluded.includes(value.directory) || tag.toLowerCase() !== 'latest' && value.release !== tag) continue;
+        if (tag.toLowerCase() !== 'latest' && value.release !== tag) continue;
         const toolchain = await inspectToolchain(value.directory);
-        if (!isCompleteToolchain(toolchain)) continue;
+        if (!isCompleteToolchain(toolchain) || excludedDirectories.has(toolchain.directory)) continue;
         await verifyToolchainDistribution(toolchain.directory, value.target);
         return { ...value, directory: toolchain.directory };
     } catch { /* 失败代次或损坏缓存不能阻止恢复较旧的已校验安装。 */ }

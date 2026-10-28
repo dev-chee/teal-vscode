@@ -10,6 +10,7 @@ import { activate, deactivate } from '../src/extension';
 import { executable } from '../src/environment';
 import { toolchainTargets } from '../src/platform';
 import { releaseAssetName } from '../src/toolchainDownloadCore';
+import { toolchainTestContext } from './helpers/extensionContext';
 
 /** 注入真实进程启动的一次失败，验证激活入口、旧 LSP 恢复和候选目录重试。 */
 export async function run(): Promise<void> {
@@ -17,9 +18,10 @@ export async function run(): Promise<void> {
     assert.ok(source, 'a verified native distribution is required');
     const root = await mkdtemp(path.join(tmpdir(), 'teal-recovery-host-'));
     const subscriptions: vscode.Disposable[] = [];
-    const context = { globalStorageUri: vscode.Uri.file(path.join(root, 'storage')), subscriptions } as vscode.ExtensionContext;
+    const context = toolchainTestContext(root, subscriptions);
     const originalFetch = globalThis.fetch;
     const originalSpawn = childProcess.spawn;
+    const originalPath = process.env.PATH;
     const config = vscode.workspace.getConfiguration('teal');
     let failOnce = false;
     let starts = 0;
@@ -48,6 +50,8 @@ export async function run(): Promise<void> {
     }
     try {
         assert.ok(vscode.workspace.isTrusted);
+        // 系统已有 Teal 应继续优先，但不能掩盖本用例要验收的托管切换。
+        process.env.PATH = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32') : '/usr/bin:/bin';
         const bundle = path.join(root, 'bundle');
         await cp(source, bundle, { recursive: true });
         const packed = path.join(root, 'fixture.tar.gz');
@@ -113,6 +117,7 @@ export async function run(): Promise<void> {
         await stop();
         childProcess.spawn = originalSpawn;
         globalThis.fetch = originalFetch;
+        process.env.PATH = originalPath;
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');
         await rm(root, { recursive: true, force: true }).catch(() => {});
     }

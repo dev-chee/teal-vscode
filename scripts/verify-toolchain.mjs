@@ -1,5 +1,5 @@
 import { execFile } from 'node:child_process';
-import { appendFile, mkdir, mkdtemp, readdir, rename, rm, writeFile } from 'node:fs/promises';
+import { appendFile, mkdir, mkdtemp, readFile, readdir, rename, rm, writeFile } from 'node:fs/promises';
 import * as path from 'node:path';
 import { promisify, parseArgs } from 'node:util';
 import { archiveName, distribution, readRelease, targets } from './toolchain-release.mjs';
@@ -7,8 +7,17 @@ import { validateToolchainArchiveListing, validateToolchainArchiveTypes, verifyT
 import { downloadVerifiedAsset } from '../src/toolchainTransferCore.cjs';
 
 const exec = promisify(execFile);
-const { values } = parseArgs({ options: { target: { type: 'string' }, release: { type: 'string', default: 'latest' }, resolve: { type: 'boolean' } } });
-const release = await readRelease(values.release);
+const { values } = parseArgs({ options: {
+    target: { type: 'string' },
+    release: { type: 'string', default: 'latest' },
+    resolve: { type: 'boolean' },
+    'require-pinned-release': { type: 'boolean' },
+} });
+const requestedRelease = values.release.trim();
+if (values['require-pinned-release'] && !/^toolchain-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(requestedRelease)) {
+    throw new Error('A bundled VSIX requires an explicit toolchain-vX.Y.Z release.');
+}
+const release = await readRelease(requestedRelease);
 if (values.resolve) {
     const include = targets.map((target) => ({ target, ...distribution.targets[target] }));
     if (process.env.GITHUB_OUTPUT) await appendFile(process.env.GITHUB_OUTPUT, `tag=${release.tag_name}\nmatrix=${JSON.stringify({ include })}\n`);
@@ -36,6 +45,11 @@ if (values.resolve) {
         const directories = (await readdir(extracted, { withFileTypes: true })).filter((entry) => entry.isDirectory());
         if (directories.length !== 1) throw new Error('Expected exactly one distribution root.');
         const directory = await verifyToolchainDistribution(path.join(extracted, directories[0].name), target);
+        // 仅修改本次验证的副本；保留文件摘要，并将选择器绑定到实际下载的 Release。
+        const manifestPath = path.join(directory, 'manifest.json');
+        const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+        manifest.identity = { repository: distribution.repository, release: release.tag_name, target };
+        await writeFile(manifestPath, JSON.stringify(manifest));
         await rm(archive);
         const selection = path.join(verification, 'selection.txt');
         await writeFile(selection, directory);

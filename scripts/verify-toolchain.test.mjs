@@ -23,6 +23,18 @@ test('archive listings allow runtime Teal sources and reject implementation file
     }
 });
 
+test('bundled VSIX verification rejects latest and malformed toolchain release selectors before network access', () => {
+    const script = fileURLToPath(new URL('./verify-toolchain.mjs', import.meta.url));
+    for (const release of ['latest', '', 'toolchain-v1.2.3-beta']) {
+        const result = spawnSync(process.execPath, [script, '--target', 'linux-x64', '--release', release, '--require-pinned-release'], {
+            encoding: 'utf8',
+            env: { ...process.env, GITHUB_TOKEN: '' },
+        });
+        assert.notEqual(result.status, 0, release);
+        assert.match(result.stderr, /explicit toolchain-vX\.Y\.Z release/);
+    }
+});
+
 // POSIX 夹具保留真实 tar 权限位；Windows 对应安装路径由原生 CI 验证。
 test('installer gate verifies archive digest, the teal executable and runtime sources', { skip: process.platform === 'win32' }, async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'teal-release-verification-'));
@@ -105,7 +117,7 @@ async function verifierFixture(t) {
             : new Response(readFileSync(process.env.FIXTURE_ARCHIVE));
     `);
     let sequence = 0;
-    async function invoke({ name = 'teal-0.1.0', content = 'original runtime', omit } = {}) {
+    async function invoke({ name = 'teal-0.1.0', content = 'original runtime', omit, identity } = {}) {
         const payload = path.join(root, `payload-${sequence++}`);
         const bundle = path.join(payload, name);
         await mkdir(bundle, { recursive: true });
@@ -122,23 +134,32 @@ async function verifierFixture(t) {
             files.push({ path: file, size: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') });
         }
         await writeRuntimeFixture(bundle, files);
-        await writeFile(path.join(bundle, 'manifest.json'), JSON.stringify({ formatVersion: 1, files }));
+        await writeFile(path.join(bundle, 'manifest.json'), JSON.stringify({ formatVersion: 1, files, identity }));
         if (omit) await rm(path.join(bundle, omit === 'teal' && target.startsWith('win32-') ? 'teal.exe' : omit));
         const archive = path.join(payload, 'fixture.tar.gz');
         const packed = spawnSync('tar', ['-czf', archive, '-C', payload, name], { encoding: 'utf8' });
         assert.equal(packed.status, 0, packed.stderr);
         const digest = createHash('sha256').update(await readFile(archive)).digest('hex');
         const metadata = path.join(payload, 'release.json');
-        await writeFile(metadata, JSON.stringify({ tag_name: 'toolchain-fixture', assets: targets.map(platform => ({
+        await writeFile(metadata, JSON.stringify({ tag_name: 'toolchain-v1.2.3', assets: targets.map(platform => ({
             name: archiveName(platform), digest: `sha256:${digest}`, browser_download_url: 'https://example.invalid/fixture',
         })) }));
-        return spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, fileURLToPath(new URL('./verify-toolchain.mjs', import.meta.url)), '--target', target, '--release', 'toolchain-fixture'], {
+        return spawnSync(process.execPath, ['--import', pathToFileURL(preload).href, fileURLToPath(new URL('./verify-toolchain.mjs', import.meta.url)), '--target', target, '--release', 'toolchain-v1.2.3', '--require-pinned-release'], {
             cwd, encoding: 'utf8', timeout: 30_000,
             env: { ...process.env, FIXTURE_RELEASE: metadata, FIXTURE_ARCHIVE: archive, GITHUB_ENV: exported, GITHUB_TOKEN: '' },
         });
     }
-    return { invoke, targetRoot, selection, exported };
+    return { invoke, target, targetRoot, selection, exported };
 }
+
+test('verification records the actual selected release and target instead of archive-supplied identity', async t => {
+    const fixture = await verifierFixture(t);
+    const result = await fixture.invoke({ identity: { repository: 'other/repository', release: 'toolchain-v9.0.0', target: 'darwin-arm64' } });
+    assert.equal(result.status, 0, result.stderr);
+    const directory = await readFile(fixture.selection, 'utf8');
+    const manifest = JSON.parse(await readFile(path.join(directory, 'manifest.json'), 'utf8'));
+    assert.deepEqual(manifest.identity, { repository: 'dev-chee/teal-vscode', release: 'toolchain-v1.2.3', target: fixture.target });
+});
 
 for (const omit of ['teal', 'toolchain.json']) {
     test(`repeated verification rejects a missing ${omit} and preserves the previous selection`, async t => {

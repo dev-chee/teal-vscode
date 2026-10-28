@@ -57,6 +57,12 @@ importers:
       vscode-textmate:
         specifier: ^9.3.2
         version: 9.3.2
+      yauzl:
+        specifier: 3.4.0
+        version: 3.4.0
+      yazl:
+        specifier: 2.5.1
+        version: 2.5.1
 
 packages:
 

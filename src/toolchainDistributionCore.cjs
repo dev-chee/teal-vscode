@@ -146,4 +146,27 @@ async function verifyToolchainDistribution(directory, target) {
     return root;
 }
 
-module.exports = { validateToolchainArchiveListing, validateToolchainArchiveTypes, verifyToolchainDistribution };
+/** CI 校验后记录正式 Release 或固定 GitLab 构建；包内回退不得猜测来源或跨目标使用。 */
+async function readToolchainIdentity(directory, target) {
+    const { identity } = JSON.parse(await readFile(path.join(directory, 'manifest.json'), 'utf8'));
+    const source = identity?.source;
+    let gitlab = false;
+    if (source?.kind === 'gitlab') {
+        let repository;
+        try { repository = new globalThis.URL(identity.repository); } catch { /* 下方统一拒绝不完整来源。 */ }
+        gitlab = repository?.protocol === 'https:' && !repository.username && !repository.password
+            && !repository.search && !repository.hash && /^\/(?:[\w.-]+\/)+[\w.-]+$/.test(repository.pathname)
+            && Number.isSafeInteger(source.pipelineId) && source.pipelineId > 0
+            && Number.isSafeInteger(source.jobId) && source.jobId > 0
+            && /^[a-f0-9]{40}$/.test(source.sha) && /^[a-f0-9]{64}$/.test(source.archiveSha256)
+            && identity.release === `gitlab-pipeline-${source.pipelineId}-${source.sha}`;
+    }
+    const published = !source && identity?.repository === distribution.repository
+        && typeof identity.release === 'string' && /^toolchain-v(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/.test(identity.release);
+    if (identity?.target !== target || !published && !gitlab) {
+        throw new Error('Missing or invalid toolchain release identity.');
+    }
+    return { repository: String(identity.repository), target: String(identity.target), release: String(identity.release) };
+}
+
+module.exports = { validateToolchainArchiveListing, validateToolchainArchiveTypes, verifyToolchainDistribution, readToolchainIdentity };

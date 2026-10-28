@@ -183,6 +183,37 @@ test('symbol ownership resolves linked roots and ranks nested roots by their rea
     }
 });
 
+test('a nested linked workspace owns both editor and canonical paths when its real root is shorter', async () => {
+    const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-session-child-link-')));
+    const parent = path.join(directory, 'long-parent-workspace');
+    const actual = path.join(directory, 'x');
+    const alias = path.join(parent, 'linked-child');
+    await mkdir(parent); await mkdir(actual);
+    await symlink(actual, alias, 'junction');
+    const groups = [
+        { key: 'parent', root: parent, documents: [document(path.join(parent, 'main.tl'))] },
+        { key: 'child', root: alias, documents: [document(path.join(alias, 'inner.tl'))] },
+    ];
+    const running = new Set(groups.map(group => group.key));
+    const manager = new LanguageSessions({
+        groups: () => groups,
+        start: async group => ({ isRunning: () => running.has(group.key), dispose: async () => { running.delete(group.key); } }),
+        report: error => { throw error; },
+    });
+    try {
+        await manager.refresh();
+        assert.equal(manager.owner(path.join(alias, 'inner.tl')), 'child');
+        assert.equal(manager.owner(path.join(actual, 'inner.tl')), 'child');
+        assert.equal(manager.owner(path.join(parent, 'linked-childish', 'other.tl')), 'parent');
+        running.delete('child');
+        assert.equal(manager.owner(path.join(alias, 'inner.tl')), 'parent');
+        assert.equal(manager.owner(path.join(actual, 'inner.tl')), undefined);
+    } finally {
+        await manager.dispose();
+        await rm(directory, { recursive: true, force: true });
+    }
+});
+
 test('document order does not restart a client but removing its root disposes it', async () => {
     const f = await fixture();
     try {

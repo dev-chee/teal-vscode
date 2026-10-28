@@ -10,4 +10,4 @@ const tests = readdirSync(path.join(projectRoot, 'out-test/tests'))
   .filter((name) => name.endsWith(suffix) && name !== 'extensionHost.test.js')
   .map((name) => path.join('out-test/tests', name));
 if (!tests.length) throw new Error(`No compiled ${integration ? 'toolchain' : 'unit'} tests found.`);
-runNode('--test', ...tests, ...(!integration ? ['scripts/toolchain-release.test.mjs', 'scripts/verify-toolchain.test.mjs', 'scripts/publishing.test.mjs'] : []));
+runNode('--test', ...tests, ...(!integration ? ['scripts/toolchain-release.test.mjs', 'scripts/verify-toolchain.test.mjs', 'scripts/bundled-toolchain.test.mjs', 'scripts/publishing.test.mjs', 'scripts/gitlab-release.test.mjs', 'scripts/release-packages.test.mjs', 'scripts/test-support.test.mjs'] : []));

@@ -1,5 +1,6 @@
 import * as vscode from 'vscode';
-import { isSupported, requireExecution, setManagedToolchainProvider } from './environment';
+import { resolveBundledToolchain } from './bundledToolchain';
+import { isSupported, requireExecution, setBundledToolchainProvider, setManagedToolchainProvider } from './environment';
 import { DebugAdapter, DebugConfigurations, debugFile, runFile } from './execution';
 import { isLocalTealDocument } from './documents';
 import { LanguageClients } from './languageClient';
@@ -18,6 +19,9 @@ export async function activate(context: vscode.ExtensionContext): Promise<void> 
     const updater = new WorkspaceToolchains(context, (force, keys) => managed.refreshScopes(keys, force), message => output.appendLine(message));
     updates = updater;
     setManagedToolchainProvider(resource => updater.directory(resource));
+    // 只在首个实际工具调用时校验包内目录；普通开发 VSIX 没有该目录，会安全地回退到托管安装。
+    let bundled: ReturnType<typeof resolveBundledToolchain> | undefined;
+    setBundledToolchainProvider(() => bundled ??= resolveBundledToolchain(context.extensionUri.fsPath));
     const configurationChanged = (event?: vscode.ConfigurationChangeEvent) => { void updater.configurationChanged(event).catch(error => output.appendLine(`[Toolchain update] ${String(error)}`)); };
     const configuration = new DebugConfigurations();
     context.subscriptions.push(
@@ -73,6 +77,7 @@ export async function deactivate(): Promise<void> {
     await updates?.dispose();
     updates = undefined;
     setManagedToolchainProvider(undefined);
+    setBundledToolchainProvider(undefined);
     await clients?.dispose();
     clients = undefined;
     await disposeLanguageServerExecutables();

@@ -41,11 +41,15 @@ export class LanguageSessions<Group extends LanguageGroup> {
     }
 
     owner(file: string): string | undefined {
-        let owner: { key: string; root: string } | undefined;
+        let owner: { key: string; length: number } | undefined;
         for (const { group, root, session } of this.sessions.values()) {
-            // LSP locations use canonical paths; editor documents retain workspace aliases.
-            if (session.isRunning() && (isWithinRoot(root, file) || isWithinRoot(group.root, file)) && (!owner || root.length > owner.root.length)) {
-                owner = { key: group.key, root };
+            if (!session.isRunning()) continue;
+            // 只比较实际包含输入路径的根；链接目标长度不能决定编辑器别名的层级。
+            const canonicalLength = isWithinRoot(root, file) ? root.length : -1;
+            const editorLength = group.root === root ? canonicalLength : isWithinRoot(group.root, file) ? group.root.length : -1;
+            const length = Math.max(canonicalLength, editorLength);
+            if (length >= 0 && (!owner || length > owner.length)) {
+                owner = { key: group.key, length };
             }
         }
         return owner?.key;

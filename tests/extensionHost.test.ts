@@ -7,7 +7,7 @@ import * as path from 'node:path';
 import Mocha from 'mocha';
 import * as vscode from 'vscode';
 import { DebugConfigurations } from '../src/execution';
-import { executableName } from '../src/platform';
+import { executableName, isWithinRoot } from '../src/platform';
 import { waitForWatcher } from './watcherReadiness';
 
 export function run(): Promise<void> {
@@ -42,9 +42,17 @@ export function run(): Promise<void> {
         }
 
         async function closeAndRemove(directory: string): Promise<void> {
-            // Keep opened fixture files until the extension host exits: on Windows the LSP
-            // subprocess owns them. The host's isolated temp profile is reclaimed on exit.
-            void directory;
+            for (const document of vscode.workspace.textDocuments) {
+                if (document.uri.scheme !== 'file' || document.isClosed || !isWithinRoot(directory, document.uri.fsPath)) continue;
+                if (document.isDirty) {
+                    await vscode.window.showTextDocument(document);
+                    await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
+                }
+                // VS Code 可在关闭标签后缓存模型；释放夹具的语言归属，避免后续用例继续启动旧根。
+                if (!document.isClosed && document.languageId === 'teal') await vscode.languages.setTextDocumentLanguage(document, 'plaintext');
+            }
+            await vscode.commands.executeCommand('workbench.action.closeAllEditors');
+            // 保留磁盘夹具到宿主退出，避免 Windows 进程持有工作目录时的删除冲突。
         }
 
         test('cold-starts from a Teal document, registers commands, and recognizes a Teal document', async () => {
@@ -133,11 +141,12 @@ export function run(): Promise<void> {
                 await writeFile(source, 'fn helper(value: int) -> int { return value; }\nfn main() { let answer = helper(1); }\n');
                 const document = await vscode.workspace.openTextDocument(vscode.Uri.file(source));
                 await vscode.window.showTextDocument(document);
-                await new Promise((resolve) => setTimeout(resolve, 900));
                 const position = new vscode.Position(1, 28);
-                const completion = await vscode.commands.executeCommand<vscode.CompletionList | vscode.CompletionItem[]>('vscode.executeCompletionItemProvider', document.uri, position);
-                const labels = Array.isArray(completion) ? completion.map((item) => item.label) : completion?.items.map((item) => item.label);
-                assert.ok(labels?.some((label) => label === 'helper'), 'completion must include the declared helper');
+                await waitFor(async () => {
+                    const completion = await vscode.commands.executeCommand<vscode.CompletionList | vscode.CompletionItem[]>('vscode.executeCompletionItemProvider', document.uri, position);
+                    const labels = Array.isArray(completion) ? completion.map((item) => item.label) : completion?.items.map((item) => item.label);
+                    return labels?.some((label) => label === 'helper') ? true : undefined;
+                }, 'completion must include the declared helper');
                 const hover = await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', document.uri, position);
                 assert.ok(hover?.some((item) => item.contents.some((content) => typeof content === 'string' ? content.includes('helper') : content.value.includes('helper'))), 'hover must identify helper');
                 const definition = await vscode.commands.executeCommand<vscode.Location[]>('vscode.executeDefinitionProvider', document.uri, position);
@@ -177,7 +186,7 @@ export function run(): Promise<void> {
         });
 
         test('serves concrete LSP updates for external path dependencies, deletion recovery and manifest retargeting', async () => {
-            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-external-dependency-'));
+            const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-external-dependency-')));
             const app = path.join(root, 'app');
             const dependency = path.join(root, 'dep/src/lib.tl');
             const replacement = path.join(root, 'replacement/src/lib.tl');
@@ -361,6 +370,8 @@ export function run(): Promise<void> {
                 const editor = await vscode.window.showTextDocument(document);
                 await waitFor(async () => (await vscode.commands.executeCommand<vscode.DocumentSymbol[]>('vscode.executeDocumentSymbolProvider', inner))?.some(item => item.name === 'main') ? true : undefined,
                     'the child client must take ownership');
+                await waitFor(async () => errors(inner).some(item => item.message.includes('missing_child_name')) ? true : undefined,
+                    'the child client must publish its initial diagnostic');
                 const before = errors(inner).length;
                 assert.ok(before > 0);
                 const text = document.getText().replace('missing_child_name', '1');
@@ -500,22 +511,40 @@ export function run(): Promise<void> {
         });
 
         test('launches the real external-terminal DAP debuggee at a source breakpoint and exits after continue', async () => {
-            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-dap-external-'));
+            const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-dap-external-')));
             const source = path.join(root, 'external-debuggee.tl');
             const stopped: Array<{ session: vscode.DebugSession; reason: unknown }> = [];
             const trace: string[] = [];
             const adapterErrors: string[] = [];
+            const exitCodes: unknown[] = [];
+            const disconnectResponses: unknown[] = [];
+            const reportDirectory = process.env.TEAL_TEST_REPORT_DIR
+                ?? path.join(vscode.extensions.getExtension('dev-chee.teal-vscode')!.extensionPath, 'target', 'test-gate', 'local-vscode');
+            await mkdir(reportDirectory, { recursive: true });
+            let report = Promise.resolve();
+            let stage = 'launch';
             let terminated = false;
+            const record = (direction: string, message: unknown) => {
+                const safe = JSON.stringify(message)
+                    .replace(/("token"\s*:\s*")[^"]*/gi, '$1<redacted>')
+                    .replace(/("--token"\s*,\s*")[^"]*/gi, '$1<redacted>');
+                trace.push(`${direction}:${safe}`);
+                const snapshot = JSON.stringify({ source, stage, stopped: stopped.length, terminated, exitCodes, disconnectResponses, adapterErrors, trace }, null, 2);
+                // 启动请求可能停在编辑器或外部终端中；逐帧保存，以便宿主超时后仍能定位边界。
+                report = report.then(() => writeFile(path.join(reportDirectory, 'dap-external-trace.json'), snapshot));
+            };
             const tracker = vscode.debug.registerDebugAdapterTrackerFactory('teal', {
                 createDebugAdapterTracker(session) {
                     return {
-                        onWillReceiveMessage(message) { trace.push(`request:${message.command ?? message.event ?? message.type}`); },
+                        onWillReceiveMessage(message) { record('client->adapter', message); },
                         onDidSendMessage(message) {
-                            trace.push(`response:${message.command ?? message.event ?? message.type}:${JSON.stringify(message.body ?? {})}`);
                             if (message.type === 'event' && message.event === 'stopped') stopped.push({ session, reason: message.body?.reason });
+                            if (message.type === 'event' && message.event === 'exited') exitCodes.push(message.body?.exitCode);
                             if (message.type === 'event' && message.event === 'terminated') terminated = true;
+                            if (message.type === 'response' && message.command === 'disconnect') disconnectResponses.push(message.success);
+                            record('adapter->client', message);
                         },
-                        onError(error) { adapterErrors.push(error.message); },
+                        onError(error) { adapterErrors.push(error.message); record('error', error.message); },
                     };
                 },
             });
@@ -526,13 +555,20 @@ export function run(): Promise<void> {
                     type: 'teal', request: 'launch', name: 'DAP external terminal', program: source,
                     cwd: root, console: 'externalTerminal', stopOnEntry: false,
                 }), true, 'VS Code must accept the external-terminal launch configuration');
+                stage = 'breakpoint';
                 const event = await waitFor(async () => stopped[0], `external-terminal launch did not stop at the requested breakpoint; ${trace.join(' | ')}; errors=${adapterErrors.join(' | ')}`);
                 assert.equal(event.reason, 'breakpoint', 'external-terminal launch must stop for the source breakpoint, not entry');
                 const stack = await event.session.customRequest('stackTrace', { threadId: 1 }) as { stackFrames: Array<{ id: number }> };
                 assert.ok(stack.stackFrames.length > 0, 'external-terminal breakpoint must expose a stack frame');
+                stage = 'continue';
                 await event.session.customRequest('continue', { threadId: 1 });
                 await waitFor(async () => terminated ? true : undefined, 'external-terminal debuggee must terminate after continue');
+                assert.deepEqual(exitCodes, [0], 'external-terminal debuggee must report a successful process exit');
+                await waitFor(async () => disconnectResponses.length ? true : undefined, 'completed debuggee must acknowledge disconnect');
+                assert.deepEqual(disconnectResponses, [true], 'disconnect after normal termination must succeed');
             } finally {
+                record('cleanup', stage);
+                await report;
                 try { await vscode.debug.stopDebugging(); } catch { /* the debuggee may have already terminated */ }
                 tracker.dispose();
                 await closeAndRemove(root);
@@ -540,7 +576,7 @@ export function run(): Promise<void> {
         });
 
         test('runs a Teal file through ProcessExecution with program arguments and terminal stdin', async () => {
-            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-run-'));
+            const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-run-')));
             const source = path.join(root, '运行 with input.tl');
             let taskExecution: vscode.TaskExecution | undefined;
             const ended = new Promise<vscode.TaskProcessEndEvent>((resolve) => {

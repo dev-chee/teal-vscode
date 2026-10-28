@@ -537,6 +537,14 @@ test('independent windows retain a fixed legacy cache after another window updat
         assert.equal(await loadManagedToolchain(reopenedWindow, 'latest'), latest?.directory);
         assert.equal(await loadManagedToolchain(reopenedWindow, 'toolchain-v3.0.0'), undefined);
         assert.equal(await loadManagedToolchain(reopenedWindow, 'latest', [latest!.directory]), pinned.directory);
+        const excludedAlias = path.join(root, 'candidate-alias');
+        await fs.symlink(latest!.directory, excludedAlias, 'junction');
+        assert.equal(await loadManagedToolchain(reopenedWindow, 'latest', [excludedAlias]), pinned.directory,
+            'an alias must exclude the same failed installation');
+        if (process.platform === 'win32') {
+            const alternateDrive = latest!.directory[0].toLowerCase() + latest!.directory.slice(1);
+            assert.equal(await loadManagedToolchain(reopenedWindow, 'latest', [alternateDrive]), pinned.directory);
+        }
         assert.equal(network, before, 'offline cache selection must never fetch');
         assert.equal(await readFile(path.join(pinned.directory, 'toolchain.json'), 'utf8'), 'metadata v1');
     } finally { await rm(root, { recursive: true, force: true }); }

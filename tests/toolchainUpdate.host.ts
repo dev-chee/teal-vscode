@@ -17,8 +17,10 @@ export async function run(): Promise<void> {
     assert.ok(vscode.workspace.isTrusted);
     const root = await mkdtemp(path.join(tmpdir(), 'teal-update-host-'));
     const originalFetch = globalThis.fetch;
+    const originalPath = process.env.PATH;
     const config = vscode.workspace.getConfiguration('teal');
     try {
+        process.env.PATH = process.platform === 'win32' ? path.join(process.env.SystemRoot ?? 'C:\\Windows', 'System32') : '/usr/bin:/bin';
         const bundle = path.join(root, 'bundle');
         await cp(source, bundle, { recursive: true });
         const packed = path.join(root, 'fixture.tar.gz');
@@ -76,6 +78,7 @@ export async function run(): Promise<void> {
     } finally {
         await config.update('toolchain.autoUpdate', false, vscode.ConfigurationTarget.Global);
         globalThis.fetch = originalFetch;
+        process.env.PATH = originalPath;
         await vscode.commands.executeCommand('workbench.action.closeAllEditors');
         await rm(root, { recursive: true, force: true }).catch(() => {});
     }

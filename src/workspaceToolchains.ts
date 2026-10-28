@@ -122,14 +122,13 @@ export class WorkspaceToolchains {
                 const fallback = previous && previous !== directory ? previous : await this.cached(release, [directory]);
                 this.directories.set(release, Promise.resolve(fallback));
                 if (!fallback) this.blocked.add(release);
-                if (fallback) {
-                    try {
-                        await this.refresh(true, keys);
-                        this.applied.set(release, signature);
-                        this.log(`[Toolchain] Restored ${release}: ${fallback}`);
-                    } catch (restore) {
-                        throw new AggregateError([error, restore], `Toolchain activation failed: ${String(error)}; restoring the previous language server also failed.`, { cause: restore });
-                    }
+                // 没有托管回退时，执行解析器仍可选择内置工具链；撤销失败选择后必须刷新。
+                try {
+                    await this.refresh(true, keys);
+                    this.applied.set(release, signature);
+                    this.log(`[Toolchain] Restored ${release}: ${fallback ?? 'bundled fallback'}`);
+                } catch (restore) {
+                    throw new AggregateError([error, restore], `Toolchain activation failed: ${String(error)}; restoring the previous language server also failed.`, { cause: restore });
                 }
                 // 下载成功不等于进程可用；保持旧选择，使下一次检查能重试候选目录。
                 throw error;

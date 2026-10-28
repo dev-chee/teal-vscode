@@ -11,12 +11,13 @@ import { executable } from '../src/environment';
 import { executableName, toolchainTargets } from '../src/platform';
 import { releaseAssetName } from '../src/toolchainDownloadCore';
 import { writeRuntimeFixture } from './helpers/toolchainFixture.cjs';
+import { toolchainTestContext } from './helpers/extensionContext';
 
 /** 使用真实配置、激活入口、安装器和工具选择；夹具工具不执行。 */
 export async function run(): Promise<void> {
     const root = await mkdtemp(path.join(tmpdir(), 'teal-folder-updates-'));
     const subscriptions: vscode.Disposable[] = [];
-    const context = { globalStorageUri: vscode.Uri.file(path.join(root, 'storage')), subscriptions } as vscode.ExtensionContext;
+    const context = toolchainTestContext(root, subscriptions);
     const originalFetch = globalThis.fetch;
     const originalPath = process.env.PATH;
     async function within<T>(pending: Promise<T>, label: string): Promise<T> {

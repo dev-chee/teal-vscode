@@ -1,8 +1,10 @@
 name: Publish VSCode extension
 
 on:
-  push:
-    tags: ['v*']
+  # Marketplace 发布已迁移至 GitLab .gitlab-ci.yml。
+  # 停用自动标签触发，保留原配置便于查阅；手动入口仅用于验证和打包。
+  # push:
+  #   tags: ['v*']
   workflow_dispatch:
     inputs:
       toolchain_release:
@@ -10,7 +12,7 @@ on:
         type: string
         default: latest
       publish:
-        description: Publish to Marketplace (select a matching v* tag)
+        description: 'Disabled: publishing moved to GitLab (input retained for reference)'
         type: boolean
         default: false
 
@@ -166,7 +168,9 @@ jobs:
 
   publish:
     name: Publish verified desktop packages
-    if: github.event_name == 'push' || inputs.publish
+    # 发布代码保留，但无条件跳过；即使手动勾选 publish 也不会调用 Marketplace。
+    # 原条件：if: github.event_name == 'push' || inputs.publish
+    if: ${{ false }}
     needs: package
     runs-on: ubuntu-22.04
     steps:
