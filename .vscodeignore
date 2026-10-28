@@ -3,6 +3,7 @@
 .vscode/**
 .vscode-test/**
 node_modules/**
+.pnpm-store/**
 src/**
 tests/**
 scripts/**
