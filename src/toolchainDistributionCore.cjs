@@ -55,9 +55,16 @@ function validateToolchainArchiveTypes(listing) {
 /** 解压前检查整个归档，连分发根目录外的源码和重复条目也不得放行。 */
 function validateToolchainArchiveListing(listing) {
     const allowed = new Set([...tools, ...tools.map(tool => `${tool}.exe`), 'toolchain.json', 'manifest.json']);
+    const entries = listing.split(/\r?\n/).filter(Boolean);
+    // Rust tar 的目录名不带末尾 /；从子条目收集父目录，不依赖归档条目顺序。
+    const directories = new Set();
+    for (const entry of entries) {
+        const parts = entry.split('/');
+        for (let index = 1; index < parts.length; index++) directories.add(parts.slice(0, index).join('/'));
+    }
     const seen = new Set();
     let root;
-    for (const entry of listing.split(/\r?\n/).filter(Boolean)) {
+    for (const entry of entries) {
         const parts = entry.replace(/\/$/, '').split('/');
         if (parts.some(part => !part || part === '.' || part === '..' || /[\\:\0]/.test(part))) {
             throw new Error(`The Teal toolchain archive contains an unsafe path: ${entry}`);
@@ -65,7 +72,7 @@ function validateToolchainArchiveListing(listing) {
         root ??= parts[0];
         const name = parts.join('/');
         const relative = parts.slice(1).join('/');
-        const directory = entry.endsWith('/');
+        const directory = entry.endsWith('/') || directories.has(name);
         const allowedEntry = parts.length === 1 ? directory : directory
             ? parts[1] === 'runtime' : allowed.has(relative) || allowedRuntimeFile(relative);
         if (parts[0] !== root || seen.has(name)

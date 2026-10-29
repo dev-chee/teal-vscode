@@ -10,6 +10,27 @@ import { archiveName, targets } from './toolchain-release.mjs';
 import { validateToolchainArchiveListing, validateToolchainArchiveTypes } from '../src/toolchainDistributionCore.cjs';
 import { writeRuntimeFixture } from '../tests/helpers/toolchainFixture.cjs';
 
+test('archive listings accept Rust tar directory entries without trailing slashes', () => {
+    const root = 'teal-0.1.2-x86_64-unknown-linux-musl';
+    const entries = [root, `${root}/teal`, `${root}/manifest.json`, `${root}/runtime`,
+        `${root}/runtime/packages`, `${root}/runtime/packages/std`,
+        `${root}/runtime/packages/std/src`, `${root}/runtime/packages/std/src/ui.tl`];
+    assert.doesNotThrow(() => validateToolchainArchiveListing(entries.join('\n')));
+    assert.doesNotThrow(() => validateToolchainArchiveListing(entries.reverse().join('\n')));
+});
+
+test('inferred archive directories preserve path, root, duplicate and layout restrictions', () => {
+    const valid = 'bundle\nbundle/teal\nbundle/runtime\nbundle/runtime/packages/std/src/ui.tl\n';
+    for (const extra of ['bundle/', 'bundle/runtime/', 'bundle/teal', 'bundle/teal/child.tl',
+        'other/runtime/source.tl', 'bundle/compiler\nbundle/compiler/source.tl',
+        'bundle/runtime/../source.tl', 'bundle/runtime/.cache/source.tl',
+        'bundle/runtime/target/source.tl', '/outside/source.tl', '../outside/source.tl']) {
+        assert.throws(() => validateToolchainArchiveListing(valid + extra));
+    }
+    assert.throws(() => validateToolchainArchiveListing(''), /Empty distribution archive/);
+    assert.throws(() => validateToolchainArchiveListing('bundle'), /Unexpected distribution archive entry/);
+});
+
 test('archive listings allow runtime Teal sources and reject implementation files and links', () => {
     const valid = 'bundle/\nbundle/teal\nbundle/runtime/\nbundle/runtime/packages/\nbundle/runtime/packages/std/src/ui.tl\n';
     assert.doesNotThrow(() => validateToolchainArchiveListing(valid));

@@ -5,6 +5,7 @@ import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { gzipSync, gunzipSync } from 'node:zlib';
 import test from 'node:test';
 import { gitlabApi } from './gitlab-api.mjs';
 import { ensureReleaseTag, nextVersion, prepareRelease, resolveSourceBuild, sourceArchive, validateReleasePlan } from './gitlab-release-core.mjs';
@@ -163,10 +164,11 @@ test('GitLab artifact redirects never send the API token to object storage and s
     } finally { await rm(root, { recursive: true, force: true }); }
 });
 
-test('fixed job artifacts are verified and bundled with GitLab provenance instead of a forged public Release', { skip: process.platform === 'win32' }, async () => {
+test('Rust-style tar job artifacts are verified and bundled with GitLab provenance', { skip: process.platform === 'win32' }, async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'teal-gitlab-bundle-'));
     try {
-        const bundle = path.join(root, 'bundle');
+        const bundleName = 'teal-0.1.5-x86_64-unknown-linux-gnu';
+        const bundle = path.join(root, bundleName);
         await mkdir(bundle);
         const files = [];
         for (const name of ['teal', 'toolchain.json']) {
@@ -178,7 +180,28 @@ test('fixed job artifacts are verified and bundled with GitLab provenance instea
         await writeRuntimeFixture(bundle, files);
         await writeFile(path.join(bundle, 'manifest.json'), JSON.stringify({ formatVersion: 1, files }));
         const archive = path.join(root, 'fixture.tar.gz');
-        assert.equal(spawnSync('tar', ['-czf', archive, '-C', root, 'bundle']).status, 0);
+        assert.equal(spawnSync('tar', ['--format=ustar', '-czf', archive, '-C', root, bundleName]).status, 0);
+        // Rust tar::Builder::append_dir 保留无末尾 / 的目录名；系统 tar 默认会添加它。
+        const bytes = gunzipSync(await readFile(archive));
+        for (let offset = 0; offset < bytes.length; ) {
+            const header = bytes.subarray(offset, offset + 512);
+            if (header.every(byte => byte === 0)) break;
+            const size = Number.parseInt(header.subarray(124, 136).toString().replace(/\0.*$/, '').trim(), 8);
+            if (header[156] === 0x35) {
+                const end = header.indexOf(0);
+                assert.equal(header[end - 1], 0x2f);
+                header[end - 1] = 0;
+                header.fill(0x20, 148, 156);
+                const checksum = header.reduce((sum, byte) => sum + byte, 0);
+                header.write(`${checksum.toString(8).padStart(6, '0')}\0 `, 148, 8, 'ascii');
+            }
+            offset += 512 + Math.ceil(size / 512) * 512;
+        }
+        await writeFile(archive, gzipSync(bytes));
+        const listing = spawnSync('tar', ['-tf', archive], { encoding: 'utf8' });
+        assert.equal(listing.status, 0, listing.stderr);
+        assert.ok(listing.stdout.split('\n').includes(bundleName));
+        assert.ok(listing.stdout.split('\n').includes(`${bundleName}/runtime`));
         await mkdir(path.join(root, 'target'));
         await writeFile(path.join(root, 'target/release.json'), JSON.stringify(plan()));
         const preload = path.join(root, 'fetch.mjs');
