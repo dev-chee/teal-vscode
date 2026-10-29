@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -19,7 +19,7 @@ const teal = path.join(toolchain, executableName('teal'));
 const document = (file: string) => ({ path: file, uri: pathToFileURL(file).toString() });
 
 test('CLI receives generated run arguments, Unicode arguments and synchronous terminal input', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'teal-cli-integration-'));
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-cli-integration-')));
     try {
         assert.deepEqual(Object.keys((await resolveToolchain(toolchain)).tools), ['teal']);
         const program = path.join(root, '中文 with spaces.tl');
@@ -32,7 +32,7 @@ test('CLI receives generated run arguments, Unicode arguments and synchronous te
 });
 
 test('session coordination refreshes a real parent LSP after saving a nested dependency', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'teal-lsp-integration-'));
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-lsp-integration-')));
     const peers: Array<{ group: LanguageGroup; peer: ProtocolPeer }> = [];
     const errors: unknown[] = [];
     await mkdir(path.join(root, 'child'));
@@ -75,7 +75,7 @@ test('session coordination refreshes a real parent LSP after saving a nested dep
 });
 
 test('normalized launch options reach real DAP and support stop, stack trace and continue', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'teal-dap-integration-'));
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-dap-integration-')));
     const peer = new ProtocolPeer(teal, root, ['dap']);
     let child: ChildProcess | undefined;
     try {

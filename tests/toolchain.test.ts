@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { chmod, mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -7,7 +7,7 @@ import { resolveToolchain, toolNames } from '../src/toolchain';
 import { executableName } from '../src/platform';
 
 async function fixture(name: string): Promise<string> {
-    return mkdtemp(path.join(tmpdir(), `teal-vscode-${name}-`));
+    return realpath(await mkdtemp(path.join(tmpdir(), `teal-vscode-${name}-`)));
 }
 
 async function tools(directory: string, names: readonly string[]): Promise<void> {

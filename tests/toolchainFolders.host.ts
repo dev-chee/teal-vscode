@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
@@ -15,7 +15,7 @@ import { toolchainTestContext } from './helpers/extensionContext';
 
 /** 使用真实配置、激活入口、安装器和工具选择；夹具工具不执行。 */
 export async function run(): Promise<void> {
-    const root = await mkdtemp(path.join(tmpdir(), 'teal-folder-updates-'));
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-folder-updates-')));
     const subscriptions: vscode.Disposable[] = [];
     const context = toolchainTestContext(root, subscriptions);
     const originalFetch = globalThis.fetch;

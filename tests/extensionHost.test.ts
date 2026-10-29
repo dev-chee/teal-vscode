@@ -62,7 +62,7 @@ export function run(): Promise<void> {
             for (const command of ['teal.restartServer', 'teal.installToolchain', 'teal.runFile', 'teal.debugFile', 'teal.showOutput', 'teal.openSettings']) {
                 assert.ok(!(await vscode.commands.getCommands(true)).includes(command), 'test requires a cold extension host before opening Teal');
             }
-            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-host-'));
+            const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-host-')));
             try {
                 const source = path.join(root, '中文 path.tl');
                 await writeFile(source, 'fn main() { print("ok"); }\n');
@@ -81,7 +81,7 @@ export function run(): Promise<void> {
         });
 
         test('recognizes generated builtin interface files without treating them as executable source', async () => {
-            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-interface-'));
+            const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-interface-')));
             try {
                 const source = path.join(root, 'builtin.tli');
                 await writeFile(source, 'builtin global {\n    fn print(values: printable...);\n}\n');
@@ -106,7 +106,7 @@ export function run(): Promise<void> {
         });
 
         test('resolves tier and permissionFile using debug cwd and rejects legacy launch options', async () => {
-            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-launch-'));
+            const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-launch-')));
             try {
                 const source = path.join(root, 'main.tl');
                 const permissionFile = path.join(root, '权限 with spaces.toml');
@@ -135,7 +135,7 @@ export function run(): Promise<void> {
         });
 
         test('serves concrete LSP results for UTF-16 paths, unsaved changes, rename, diagnostics, formatting, and semantic tokens', async () => {
-            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-lsp-'));
+            const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-lsp-')));
             try {
                 const source = path.join(root, '中文 space [lsp].tl');
                 await writeFile(source, 'fn helper(value: int) -> int { return value; }\nfn main() { let answer = helper(1); }\n');
@@ -391,7 +391,7 @@ export function run(): Promise<void> {
         });
 
         test('refreshes LSP symbols after disk create, change, delete, and an explicit restart', async () => {
-            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-watch-'));
+            const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-watch-')));
             const initial = path.join(root, 'initial.tl');
             const created = path.join(root, 'created.tl');
             const symbols = async (query: string) => vscode.commands.executeCommand<vscode.SymbolInformation[]>('vscode.executeWorkspaceSymbolProvider', query);
@@ -414,7 +414,7 @@ export function run(): Promise<void> {
         });
 
         test('recovers from a missing configured tool without blocking a later real LSP session', async () => {
-            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-missing-tool-'));
+            const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-missing-tool-')));
             const source = path.join(root, 'recovered.tl');
             const missing = path.join(root, 'missing tools');
             try {
@@ -434,7 +434,7 @@ export function run(): Promise<void> {
         });
 
         test('launches the real integrated-terminal DAP adapter and observes a stopped protocol session', async () => {
-            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-dap-'));
+            const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-dap-')));
             const source = path.join(root, 'debuggee.tl');
             const stopped: vscode.DebugSession[] = [];
             const received: string[] = [];
@@ -607,7 +607,7 @@ export function run(): Promise<void> {
         });
 
         test('attaches to a pipe-captured debuggee and reports its actual post-authentication exit', async () => {
-            const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-attach-'));
+            const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-attach-')));
             const source = path.join(root, 'attach.tl');
             const port = 47_000 + Math.floor(Math.random() * 1_000);
             const token = 'attach-test-token';

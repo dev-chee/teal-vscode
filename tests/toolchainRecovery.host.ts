@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import childProcess, { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
@@ -16,7 +16,7 @@ import { toolchainTestContext } from './helpers/extensionContext';
 export async function run(): Promise<void> {
     const source = process.env.TEAL_TOOLCHAIN_PATH;
     assert.ok(source, 'a verified native distribution is required');
-    const root = await mkdtemp(path.join(tmpdir(), 'teal-recovery-host-'));
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-recovery-host-')));
     const subscriptions: vscode.Disposable[] = [];
     const context = toolchainTestContext(root, subscriptions);
     const originalFetch = globalThis.fetch;

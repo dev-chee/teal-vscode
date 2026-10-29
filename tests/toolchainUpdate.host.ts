@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { cp, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import { promisify } from 'node:util';
@@ -15,7 +15,7 @@ export async function run(): Promise<void> {
     const storage = process.env.TEAL_TEST_STORAGE_DIR;
     assert.ok(source); assert.ok(storage);
     assert.ok(vscode.workspace.isTrusted);
-    const root = await mkdtemp(path.join(tmpdir(), 'teal-update-host-'));
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-update-host-')));
     const originalFetch = globalThis.fetch;
     const originalPath = process.env.PATH;
     const config = vscode.workspace.getConfiguration('teal');

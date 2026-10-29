@@ -1,4 +1,4 @@
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, writeFileSync } from 'node:fs';
 import * as path from 'node:path';
 import * as os from 'node:os';
 import { runTests } from '@vscode/test-electron';
@@ -14,7 +14,8 @@ if (!['win32', 'linux', 'darwin'].includes(process.platform) || !['x64', 'arm64'
 if (!process.env.TEAL_TOOLCHAIN_PATH) throw new Error('TEAL_TOOLCHAIN_PATH must point at rebuilt Teal executables.');
 runNode('scripts/build.mjs');
 
-const profile = path.join(os.tmpdir(), `teal-vscode-user-${process.pid}`);
+const temporaryDirectory = realpathSync(os.tmpdir());
+const profile = path.join(temporaryDirectory, `teal-vscode-user-${process.pid}`);
 const workspace = path.join(profile, 'anchor.code-workspace');
 mkdirSync(profile, { recursive: true });
 writeFileSync(workspace, JSON.stringify({ folders: [{ path: '.' }] }));
@@ -39,6 +40,6 @@ await runTests({
     '--disable-extensions',
     workspace,
     '--user-data-dir', profile,
-    '--extensions-dir', path.join(os.tmpdir(), `teal-vscode-${process.pid}`),
+    '--extensions-dir', path.join(temporaryDirectory, `teal-vscode-${process.pid}`),
   ],
 });

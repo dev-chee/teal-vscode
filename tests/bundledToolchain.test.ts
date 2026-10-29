@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { chmod, mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
 import test from 'node:test';
@@ -32,7 +32,7 @@ async function distribution(root: string): Promise<string> {
 }
 
 test('a target VSIX exposes its manifest-verified bundled toolchain', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-bundled-'));
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-bundled-')));
     try {
         const directory = await distribution(root);
         assert.deepEqual(await resolveBundledToolchain(root, 'linux-x64'), { directory, release: 'toolchain-v2.0.0' });
@@ -44,7 +44,7 @@ test('a target VSIX exposes its manifest-verified bundled toolchain', async () =
 });
 
 test('bundled toolchains require a stable release identity for the matching target and repository', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-bundled-identity-'));
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-bundled-identity-')));
     try {
         const directory = await distribution(root);
         const file = path.join(directory, 'manifest.json');
@@ -64,7 +64,7 @@ test('bundled toolchains require a stable release identity for the matching targ
 });
 
 test('bundled GitLab builds retain their pipeline, job and source identity without claiming a public Release', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'teal-vscode-bundled-gitlab-'));
+    const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-bundled-gitlab-')));
     try {
         const directory = await distribution(root);
         const file = path.join(directory, 'manifest.json');
