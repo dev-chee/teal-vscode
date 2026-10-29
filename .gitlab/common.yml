@@ -14,9 +14,10 @@ cache:
 # CI_PROJECT_DIR 仅在 Runner 任务中可用；在脚本内解析，避免父子流水线转发时丢失路径。
 .node_unix:
   before_script:
+    - source scripts/ci-node.sh
     - node --version
     - npm --version
-    - npm install --global pnpm@11.25.0
+    - npm install --global --prefix "$CI_PROJECT_DIR/target/ci/npm" pnpm@11.25.0
     - pnpm install --frozen-lockfile --store-dir "$CI_PROJECT_DIR/.pnpm-store"
 
 .node_windows:

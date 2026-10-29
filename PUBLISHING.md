@@ -42,7 +42,7 @@ Teal 源流水线和插件流水线的 job artifacts 默认保留 30 天。过�
 | `linux` | Ubuntu x64 / WSL | `linux-x64`、`linux-arm64`、`linux-armhf`、`alpine-x64`、`alpine-arm64` | GNU/Linux x64 协议与 VS Code 宿主测试 |
 | `macos` | macOS x64 | `darwin-x64`、`darwin-arm64` | macOS x64 协议与 VS Code 宿主测试 |
 
-标签可用 `TEAL_RUNNER_TAG_WINDOWS`、`TEAL_RUNNER_TAG_LINUX`、`TEAL_RUNNER_TAG_MACOS` 覆盖。Runner 预装 Node.js 22 x64、npm、Git 与支持 ZIP/tar.gz 的 `tar`；job 自行安装 pnpm 11.25.0。Unix 使用 Bash，Windows 使用 PowerShell。Ubuntu/WSL 需预装 Xvfb 及 VS Code/Electron 依赖，macOS/Windows 需支持 VS Code 宿主测试。
+标签可用 `TEAL_RUNNER_TAG_WINDOWS`、`TEAL_RUNNER_TAG_LINUX`、`TEAL_RUNNER_TAG_MACOS` 覆盖。Runner 需预装 Git 与支持 ZIP/tar.gz 的 `tar`。Unix 使用 Bash，优先使用 PATH 或 Homebrew 标准路径中的 Node.js 22 及以上版本和 npm；缺少时自动下载 Node.js 22.23.4 到 `target/ci/node/`，校验官方 SHA-256 后使用，需要 `curl` 及 `sha256sum`（Linux）或 `shasum`（macOS）。Unix job 将 pnpm 11.25.0 安装到 `target/ci/npm/`，无需全局目录写权限。Windows 使用 PowerShell，仍需预装 Node.js 22 x64 和 npm，job 自行安装 pnpm。Ubuntu/WSL 需预装 Xvfb 及 VS Code/Electron 依赖，macOS/Windows 需支持 VS Code 宿主测试。
 
 ARM64、ARMhf 与 Alpine 目标在插件流水线中只做制品和完整性验证、打包；其交叉编译由 Teal 仓库负责。不要求 ARM Runner、Docker 或 QEMU；这些目标未在此流程执行原生宿主或模拟器测试，不能把打包成功视为运行验收通过。
 
