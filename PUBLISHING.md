@@ -2,8 +2,6 @@
 
 插件发布由 GitLab 的 `release`（或 `release/*`）分支推送触发。流水线使用 Windows x64、Ubuntu x64（WSL）和 macOS x64 三个 Runner，为全部九个桌面目标生成内置 Teal 工具链的 VSIX。全部验证和打包成功后才自动打标签并上架；不需要手动创建版本标签。
 
-GitHub 的 `.github/workflows/publish-marketplace.yml` 已注释自动触发，发布 job 固定跳过；原代码和原条件保留供查阅，手动入口只验收和打包。
-
 ## 版本与发布顺序
 
 1. 推送新的 release 分支提交，父流水线先执行类型检查、Lint 和单元测试。

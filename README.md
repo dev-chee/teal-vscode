@@ -201,12 +201,12 @@ TEAL_TOOLCHAIN_PATH=/mnt/d/teal/target/release pnpm run test:toolchain
 - `toolchain.ts`、`platform.ts` 处理工具发现和平台路径规则；`reporting.ts` 集中处理日志、通知和命令错误。
 - 核心单测直接调用这些模块；`toolchain.integration.ts` 通过标准协议连接真实工具，编辑器交互测试保留在 `extensionHost.test.ts`。
 
-测试环境与实际验收结果见测试入口及 `target/test-gate/local-vscode/` 下生成的报告；报告目录和 VSIX 是本地产物，不纳入 Git。发布流程见 [`PUBLISHING.md`](PUBLISHING.md)：向 GitLab（`funplus` remote）的 `release` / `release/*` 分支推送新提交，使用 Teal 最新成功构建生成内置工具链的 VSIX；全部目标首次构建成功后自动递增 patch、打 tag 并发布 Marketplace，新版本必须高于所有分支的稳定版本标签。准备 job 的重试恢复原快照，打标和上架前均校验九包的计划指纹；同一成功提交重试复用原 tag 和原 Teal 构建。GitHub 自动发布已停用，工作流代码及说明保留。
+测试环境与实际验收结果见测试入口及 `target/test-gate/local-vscode/` 下生成的报告；报告目录和 VSIX 是本地产物，不纳入 Git。发布流程见 [`PUBLISHING.md`](PUBLISHING.md)：向 GitLab（`funplus` remote）的 `release` / `release/*` 分支推送新提交，使用 Teal 最新成功构建生成内置工具链的 VSIX；全部目标首次构建成功后自动递增 patch、打 tag 并发布 Marketplace，新版本必须高于所有分支的稳定版本标签。准备 job 的重试恢复原快照，打标和上架前均校验九包的计划指纹；同一成功提交重试复用原 tag 和原 Teal 构建。
 
 macOS 中，由 Teal 程序通过 Host 启动的原生 Mach-O 进程使用冻结的私有执行镜像；可执行文件相对资源和动态库路径需要显式配置。VS Code 直接启动工具链的路径保持不变，具体约束见 [Host 文档](https://github.com/dev-chee/teal/blob/main/crates/teal-host/README.md)。
 
 ## 全平台 CI
 
-插件 GitLab 发布从 Teal 项目指定分支（默认 `release`）最新成功的 pipeline 选取全部 9 个目标，准备阶段固定源码 SHA、pipeline 和 job ID，校验分发清单后嵌入各目标 VSIX，不依赖预先发布的 GitHub 工具链 Release。Windows x64、Ubuntu x64（WSL）、macOS x64 三个 Runner 完成全部打包；ARM64、ARMhf 与 Alpine 目标使用 Teal CI 的交叉构建结果。`release` 分支首次构建成功后自动分配版本 tag 并上架，已打标版本的重试保持来源不变。GitHub 的 `publish-marketplace.yml` 保留为手动验收入口，发布 job 已固定跳过；详情见 [`PUBLISHING.md`](PUBLISHING.md)。
+插件 GitLab 发布从 Teal 项目指定分支（默认 `release`）最新成功的 pipeline 选取全部 9 个目标，准备阶段固定源码 SHA、pipeline 和 job ID，校验分发清单后嵌入各目标 VSIX，不依赖预先发布的 GitHub 工具链 Release。Windows x64、Ubuntu x64（WSL）、macOS x64 三个 Runner 完成全部打包；ARM64、ARMhf 与 Alpine 目标使用 Teal CI 的交叉构建结果。`release` 分支首次构建成功后自动分配版本 tag 并上架，已打标版本的重试保持来源不变；详情见 [`PUBLISHING.md`](PUBLISHING.md)。
 
 GitLab 在 Windows、GNU/Linux、macOS 的 x64 宿主运行真实 CLI/LSP/DAP 和 VS Code 测试，覆盖集成终端调试、单步、变量、运行输入和 attach。CI 不启动外部终端与完整多根工作区交互测试；本地 `pnpm test` 可运行完整集合。其余目标只校验分发包并打包，不要求 ARM Runner、Docker 或 QEMU，不能将交叉编译或打包成功视为原生执行验收。公开工具链的 GitHub Release 仍由 Teal 仓库的 `toolchain-v*` 流程维护，供现有自动更新器使用。
