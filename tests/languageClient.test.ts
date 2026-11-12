@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
+import childProcess, { type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { once } from 'node:events';
 import Module, { createRequire } from 'node:module';
 import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import * as path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import * as executables from '../src/languageServerExecutable';
 import type { Reporter } from '../src/reporting';
-import type { LanguageClientOptions } from 'vscode-languageclient/node';
+import type { LanguageClientOptions, ServerOptions } from 'vscode-languageclient/node';
 import { isWithinRoot } from '../src/platform';
 
 const loader = Module as unknown as { _load(request: string, parent: NodeModule | undefined, isMain?: boolean): unknown };
@@ -19,10 +22,13 @@ let fault: 'constructor' | 'watcher' | 'listener' | 'start' | undefined;
 let executableFile = '';
 let disposedClients = 0;
 let disposedWatchers = 0;
+let exerciseProcess = false;
+let shutdownTimesOut = false;
+let closedBeforeClientTimeout = false;
+let shutdownNotification: boolean | 'force' | undefined;
 const folder = { uri: { fsPath: tmpdir(), toString: () => pathToFileURL(tmpdir()).toString() }, name: 'fixture', index: 0 };
 let folders: Array<typeof folder> = [];
 const clientOptions: LanguageClientOptions[] = [];
-const serverOptions: Array<{ command?: string; args?: string[] }> = [];
 function fileUri(file: string) {
     const uri = { scheme: 'file', fsPath: file, query: '', fragment: '', toString: () => pathToFileURL(file).toString(), with: () => uri };
     return uri;
@@ -49,14 +55,31 @@ const vscode = {
 };
 class Client {
     state = 2;
-    constructor(_id: string, _name: string, server: unknown, options: LanguageClientOptions) {
+    private child: ChildProcessWithoutNullStreams | undefined;
+    constructor(_id: string, _name: string, private readonly server: ServerOptions, options: LanguageClientOptions) {
         if (fault === 'constructor') throw new Error('client construction failed');
-        serverOptions.push(server as { command?: string; args?: string[] });
         clientOptions.push(options);
     }
     onDidChangeState = noop;
-    async start() { if (fault === 'start') throw new Error('client startup failed'); }
-    async dispose() { disposedClients++; }
+    error(_message: string, _data?: unknown, showNotification?: boolean | 'force') { shutdownNotification = showNotification; }
+    async start() {
+        if (fault === 'start') throw new Error('client startup failed');
+        if (exerciseProcess && typeof this.server === 'function') this.child = await this.server() as ChildProcessWithoutNullStreams;
+    }
+    async dispose(timeout = 2000) {
+        disposedClients++;
+        if (shutdownTimesOut) {
+            if (this.child) {
+                closedBeforeClientTimeout = await Promise.race([
+                    once(this.child, 'close').then(() => true),
+                    delay(timeout, false, { ref: false }),
+                ]);
+            }
+            this.error('Connection closed', undefined, 'force');
+            throw new Error('Stopping the server timed out');
+        }
+        this.child?.stdin.end();
+    }
 }
 
 loader._load = (request, parent, isMain) => {
@@ -77,7 +100,6 @@ for (const failure of ['configuration', 'constructor', 'watcher', 'listener', 's
         entries = failure === 'configuration' ? [123] : [];
         fault = failure === 'configuration' || failure === 'none' ? undefined : failure;
         disposedClients = disposedWatchers = 0;
-        serverOptions.length = 0;
         const errors: string[] = [];
         const copies: string[] = [];
         const stage = executables.stageLanguageServerExecutable;
@@ -93,7 +115,6 @@ for (const failure of ['configuration', 'constructor', 'watcher', 'listener', 's
             if (failure === 'none') {
                 assert.deepEqual(errors, []);
                 assert.equal(await readFile(copies[0], 'utf8'), 'fixture executable, never executed');
-                assert.deepEqual(serverOptions[0]?.args, ['lsp']);
                 await clients.dispose();
                 assert.equal(disposedClients, 1);
                 assert.equal(disposedWatchers, 1);
@@ -110,6 +131,50 @@ for (const failure of ['configuration', 'constructor', 'watcher', 'listener', 's
         }
     });
 }
+
+test('restart recovers from shutdown timeout and launches a fresh copy of the configured toolchain', async t => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'teal-client-restart-'));
+    executableFile = path.join(directory, 'teal.exe');
+    await writeFile(executableFile, 'first image');
+    entries = [];
+    fault = undefined;
+    exerciseProcess = true;
+    const spawn = childProcess.spawn;
+    const children: ChildProcessWithoutNullStreams[] = [];
+    const copies: string[] = [];
+    const stage = executables.stageLanguageServerExecutable;
+    t.mock.method(executables, 'stageLanguageServerExecutable', (file: string) => stage(file, 'win32'));
+    t.mock.method(childProcess, 'spawn', (file: string, args: string[]) => {
+        assert.deepEqual(args, ['lsp']);
+        assert.ok(children.every(child => child.exitCode !== null || child.signalCode !== null));
+        const child = spawn(process.execPath, ['-e', 'process.stdin.resume()']);
+        copies.push(file);
+        children.push(child);
+        return child;
+    });
+    const errors: unknown[] = [];
+    const reporter = { report: (error: unknown) => { errors.push(error); }, output: { appendLine() {} } } as unknown as Reporter;
+    const clients = new LanguageClients(reporter);
+    try {
+        await clients.refresh();
+        await writeFile(executableFile, 'synchronized image');
+        shutdownTimesOut = true;
+        await clients.refresh(true);
+        assert.ok(closedBeforeClientTimeout, 'closing the child must release pending requests before client timeout');
+        assert.equal(shutdownNotification, false, 'intentional shutdown errors should only be logged');
+        assert.equal(copies.length, 2);
+        assert.equal(await readFile(copies[1], 'utf8'), 'synchronized image');
+        assert.notEqual(copies[0], copies[1]);
+        await assert.rejects(readFile(copies[0]), /ENOENT/);
+        assert.deepEqual(errors, []);
+    } finally {
+        shutdownTimesOut = false;
+        exerciseProcess = false;
+        await clients.dispose();
+        await executables.disposeLanguageServerExecutables();
+        await rm(directory, { recursive: true, force: true });
+    }
+});
 
 test('existing clients map cross-root results to a child buffer opened after parent startup', async () => {
     const directory = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-client-uri-')));

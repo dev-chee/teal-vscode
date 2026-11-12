@@ -1,4 +1,5 @@
 import * as path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import * as vscode from 'vscode';
 import { CloseAction, ErrorAction, LanguageClient, State, type LanguageClientOptions } from 'vscode-languageclient/node';
 import { stringArray } from './configuration';
@@ -8,6 +9,7 @@ import { LanguagePaths, resolveDocumentPaths, type ResolvedDocumentPaths } from 
 import { LanguageDiagnostics } from './languageDiagnostics';
 import { LanguageSessions, type LanguageGroup, type LanguageSession } from './languageSessions';
 import { languageServerEnvironment, releaseLanguageServerExecutable, stageLanguageServerExecutable } from './languageServerExecutable';
+import { launchLanguageServer } from './languageServerProcess';
 import type { Reporter } from './reporting';
 
 interface Group extends LanguageGroup {
@@ -67,6 +69,7 @@ export class LanguageClients {
         const diagnostics = new LanguageDiagnostics<vscode.Uri, vscode.Diagnostic>(group.key, file => this.sessions.owner(file));
         let clientPaths: LanguagePaths | undefined;
         let client: LanguageClient | undefined;
+        let server: ReturnType<typeof launchLanguageServer> | undefined;
         let started = false;
         let stopping = false;
         const subscriptions: vscode.Disposable[] = [];
@@ -80,9 +83,24 @@ export class LanguageClients {
                 try { subscription.dispose(); }
                 catch (error) { failures.push(error); }
             }
-            try { await client?.dispose(); }
-            catch (error) { failures.push(error); }
-            finally { await releaseLanguageServerExecutable(command); }
+            let shutdownError: unknown;
+            // 在客户端自己的超时清掉连接前回收进程，让关闭事件结束旧连接上的待处理请求。
+            const shutdown = client?.dispose(5000).then(() => true, error => {
+                shutdownError = error;
+                return false;
+            }) ?? Promise.resolve(true);
+            const graceful = await Promise.race([shutdown, delay(2000, false, { ref: false })]);
+            try {
+                const terminated = await server?.stop(graceful);
+                await shutdown;
+                await releaseLanguageServerExecutable(command);
+                if (!graceful || terminated) {
+                    this.reporter.output.appendLine(`[LSP] Recovered shutdown in ${group.root}${shutdownError === undefined ? '' : `: ${String(shutdownError)}`}`);
+                }
+            } catch (error) {
+                if (shutdownError !== undefined) failures.push(shutdownError);
+                failures.push(error);
+            }
             if (failures.length) throw new AggregateError(failures, 'Language server cleanup failed.');
         };
         // 复制后的环境、客户端和监听器初始化也可能失败，统一纳入清理范围。
@@ -121,7 +139,15 @@ export class LanguageClients {
                     },
                 },
             };
-            const active = new LanguageClient('teal', `Teal (${group.folder.name})`, { command, args: ['lsp'], options: { cwd: group.root, env: environment } }, options);
+            const active = new class extends LanguageClient {
+                override error(message: string, data?: unknown, showNotification?: boolean | 'force'): void {
+                    // 回收旧连接时保留协议日志，由会话管理器报告真正的重启失败。
+                    super.error(message, data, stopping ? false : showNotification);
+                }
+            }('teal', `Teal (${group.folder.name})`, () => {
+                server = launchLanguageServer(command, group.root, environment, message => this.reporter.output.appendLine(message));
+                return server.ready;
+            }, options);
             client = active;
             subscriptions.push(active.onDidChangeState((event) => {
                 if (event.newState === State.Stopped && started && !stopping) {
