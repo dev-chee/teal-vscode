@@ -413,7 +413,7 @@
     "@types/node": "^20.0.0",
     "@types/proper-lockfile": "4.1.4",
     "@types/vscode": "1.91.0",
-    "@vscode/test-electron": "^2.5.2",
+    "@vscode/test-electron": "^3.1.0",
     "@vscode/vsce": "^3.6.0",
     "esbuild": "^0.25.0",
     "eslint": "^10.0.0",
