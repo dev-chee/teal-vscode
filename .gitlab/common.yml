@@ -21,6 +21,11 @@ cache:
     - pnpm install --frozen-lockfile --store-dir "$CI_PROJECT_DIR/.pnpm-store"
 
 .node_windows:
+  variables:
+    # Runner 在 before_script 前清理上次检出的 pnpm 目录。
+    GIT_CONFIG_COUNT: '1'
+    GIT_CONFIG_KEY_0: core.longPaths
+    GIT_CONFIG_VALUE_0: 'true'
   before_script:
     - node --version
     - npm --version
