@@ -44,8 +44,9 @@ export async function run(): Promise<void> {
         assert.ok(extension); await extension.activate();
         const fixture = path.join(root, 'project'); await mkdir(fixture);
         const file = path.join(fixture, 'main.tl');
-        await writeFile(file, 'fn helper(value: int) -> int { return value; }\nfn main() { print(helper(42)); }\n');
+        await writeFile(file, 'fn helper(value: i32) -> i32 { return value; }\nfn main() -> i32 { print(helper(42)); return 0; }\n');
         const document = await vscode.workspace.openTextDocument(file);
+        const helperPosition = new vscode.Position(1, document.lineAt(1).text.indexOf('helper') + 2);
         await vscode.window.showTextDocument(document);
         const stateFile = path.join(storage, 'managed-toolchain/current.json');
         async function waitFor<T>(action: () => Promise<T | undefined>): Promise<T> {
@@ -61,7 +62,7 @@ export async function run(): Promise<void> {
         assert.equal(first.release, 'toolchain-v1.0.0');
         assert.equal(first.repository, 'dev-chee/teal-vscode');
         const hover = () => waitFor(async () => {
-            const result = await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', document.uri, new vscode.Position(1, 20));
+            const result = await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', document.uri, helperPosition);
             return result?.length ? result : undefined;
         });
         await hover();

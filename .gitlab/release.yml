@@ -11,6 +11,7 @@ stages: [prepare, build, publish]
 variables:
   # 最近版本标签和同一提交的已发布标签都需要完整历史。
   GIT_DEPTH: '0'
+  TEAL_SOURCE_TAG: toolchain-v0.2.0
 
 prepare_release:
   extends: .linux_job

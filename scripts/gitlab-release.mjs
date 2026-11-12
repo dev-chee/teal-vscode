@@ -10,6 +10,7 @@ if (command === 'prepare') {
     const plan = await prepareRelease({
         api: gitlabApi(process.env.CI_API_V4_URL, process.env.TEAL_GITLAB_READ_TOKEN),
         apiUrl: process.env.CI_API_V4_URL, sourceProject: process.env.TEAL_SOURCE_PROJECT, sourceRef: process.env.TEAL_SOURCE_REF,
+        sourceTag: process.env.TEAL_SOURCE_TAG,
         projectId: Number(process.env.CI_PROJECT_ID), pipelineId: Number(process.env.CI_PIPELINE_ID),
         ref: process.env.CI_COMMIT_BRANCH, sha, initialVersion: manifest.version,
     });

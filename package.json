@@ -197,7 +197,7 @@
           },
           "default": [],
           "scope": "resource",
-          "description": "根分析文件；相对路径以工作区目录为基准。留空由 fn main() 或 task main() 自动确定。"
+          "description": "根分析文件；相对路径以工作区目录为基准。留空由 fn main() -> i32 或 task main() -> i32 自动确定。"
         },
         "teal.run.options": {
           "type": "array",

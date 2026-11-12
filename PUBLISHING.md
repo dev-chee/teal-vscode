@@ -7,7 +7,7 @@
 1. 推送新的 release 分支提交，父流水线先执行类型检查、Lint 和单元测试。
 2. `release` trigger 取得 `vscode-release` 锁，等待整个子流水线结束。锁覆盖版本分配、Teal 构建选择、九平台打包、打 tag 和上架，避免并发分配同一版本。最终 job 另持有 `marketplace-publish` 锁，使直接重试子 job 时也保持上架串行；两个锁名称不同，避免父子互相等待。
 3. 根据该分支最近的稳定 `vX.Y.Z` 标签递增 patch；首次没有历史标签时使用 `package.json.version`。候选版本还必须高于整个仓库的全部稳定版本标签；若其他分支已有更高版本，使用该全局最高版本的下一 patch，例如 `v1.2.3` 所在分支遇到全局 `v2.0.0` 时分配 `v2.0.1`。
-4. 准备阶段选择 Teal 仓库指定分支最新成功的 GitLab pipeline，要求全部九个目标制品都属于该次 pipeline 和同一源码 SHA，并把版本和来源写入 `target/release.json`。单独重试准备 job 时，先通过包含 retried jobs 的 API 查询，按最早成功的 `prepare_release` job ID 恢复此文件；原制品过期或丢失时失败，不重新选择最新 Teal 构建。
+4. 准备阶段解析 Teal 发布标签记录的 GitLab pipeline，或在未配置标签时选择指定分支最新成功的 pipeline。全部九个目标制品须属于该次 pipeline 和同一源码 SHA。版本和来源写入 `target/release.json`。单独重试准备 job 时，按最早成功的 `prepare_release` job ID 恢复此文件；原制品过期或丢失时失败。
 5. 各平台 job 按固定 job ID 下载 Teal 的分发归档，校验并嵌入 VSIX。打包时使用 `--release-plan-file target/release.json`，先核对工具链身份，再将完整准备计划的规范化 SHA-256 指纹写入包内清单。版本只写入 CI 检出副本的 `package.json`，不额外提交版本变更。
 6. 九个目标全部成功后，`publish_marketplace` 读取九个 VSIX 内的插件版本、计划指纹和工具链来源，全部与当前计划一致后才创建标注标签；创建新标签时再次检查全局版本上限。随后调用 `node scripts/publish.mjs`，调用 Marketplace 前再次验证全部包。标签标注记录插件版本、SHA、构建 pipeline 和 Teal 构建快照；已有标签必须匹配完整计划，不能只凭相同文件名或源码 SHA 放行。
 
@@ -17,14 +17,15 @@
 
 ## Teal 构建来源
 
-默认来源是当前 GitLab 上的 `public-platform/teal-ai/teal` 项目、`release` 分支，可通过项目变量覆盖：
+当前发布配置锁定上游 `toolchain-v0.2.0`。发布下一版工具链时，在 `.gitlab/release.yml` 更新 `TEAL_SOURCE_TAG`。未配置标签时，从 `TEAL_SOURCE_REF` 选择最新成功的构建。
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
 | `TEAL_SOURCE_PROJECT` | `public-platform/teal-ai/teal` | Teal GitLab 项目完整路径 |
-| `TEAL_SOURCE_REF` | `release` | Teal 最新成功构建所在分支，例如 `release/0.1` |
+| `TEAL_SOURCE_TAG` | `toolchain-v0.2.0` | 上游 GitLab 的标注发布标签，固定流水线、源码提交和九个 job ID |
+| `TEAL_SOURCE_REF` | `release` | 未设置发布标签时，选择此分支的最新成功构建 |
 
-插件构建不要求先发布 GitHub `toolchain-v*` Release，也不重新编译 Teal；它直接消费 Teal CI 的最新成功交叉构建结果。每个目标来自该次 pipeline 的 `build_release_*` job，文件为 `target/dist/teal-<源码包版本>-<Rust目标>.zip` 或 `.tar.gz`。缺少任何目标时失败，不用历史平台包补齐。
+插件直接消费 Teal CI 的交叉构建结果。每个目标来自该次 pipeline 的 `build_release_*` job，文件为 `target/dist/teal-<源码包版本>-<Rust目标>.zip` 或 `.tar.gz`。缺少任何目标时失败。
 
 “最新”只在新版本准备阶段解析一次。后续各 job、准备 job 的重试和已成功版本的重试都按固定 pipeline/job ID 取包，防止构建途中来源变化。新建子流水线且该提交尚未打标时可以选择新的快照，但只能使用该子流水线的整套目标包。下载使用经过认证的 GitLab API 和 HTTPS，记录归档 SHA-256，并逐项验证包内 `manifest.json` 的文件集合、大小和 SHA-256；拒绝链接、越界路径和清单外实现源码。VSIX 包含 `teal`、`toolchain.json`、`runtime/` 及来源元数据，不包含 Rust 宿主实现源码。
 
@@ -67,10 +68,10 @@ ARM64、ARMhf 与 Alpine 目标在插件流水线中只做制品和完整性验�
 git push funplus HEAD:refs/heads/release
 ```
 
-如果 Teal 的构建分支不是默认 `release`，在项目变量中设置 `TEAL_SOURCE_REF`，或在允许传入流水线变量时使用：
+如果需要覆盖本次固定的上游标签，可在项目变量中设置 `TEAL_SOURCE_TAG`，或在允许传入流水线变量时使用：
 
 ```powershell
-git push funplus HEAD:refs/heads/release -o ci.variable="TEAL_SOURCE_REF=release/0.1"
+git push funplus HEAD:refs/heads/release -o ci.variable="TEAL_SOURCE_TAG=toolchain-v0.2.0"
 ```
 
 不要手动推送 `v*` 标签来启动发布。网页新建 release 流水线不触发发布；失败后重试原父/子流水线对应 jobs。重试准备 job 不会重新分配版本或来源；同一次子流水线的旧目标包因此仍匹配同一指纹。升级到本门禁后，缺少包内计划指纹的旧 VSIX 必须重新打包。若标签已创建但 Marketplace 只完成部分目标，重试发布器会跳过已发布目标，继续剩余目标，保留相同版本与工具链来源。

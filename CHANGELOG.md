@@ -2,6 +2,9 @@
 
 ## [Unreleased]
 
+- 发布包内置 Teal 0.2.0 工具链，按上游 GitLab 发布标签锁定九个平台的构建制品。
+- 更新入口代码片段、静态高亮和 CLI、LSP、DAP 验收样例，适配 Teal 0.2.0。
+
 ## [0.1.9] - 2026-10-29
 
 - 发布流程迁移至 GitLab：release 分支构建成功后自动递增 patch 标签并发布 VS Code Marketplace；保留并注释停用 GitHub 自动发布代码。

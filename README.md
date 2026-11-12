@@ -6,7 +6,7 @@
 
 通过 VS Code 的“扩展：从 VSIX 安装”选择构建生成的 VSIX，然后打开 `.tl` 文件。
 
-`pnpm run package:all` 生成全部 9 个平台的 VSIX；`pnpm run package --target darwin-arm64` 生成单个平台包。`pnpm run package` 仍生成通用包，`pnpm run package:windows` 生成 Windows x64 包。普通开发打包不嵌入工具链；GitLab 的 `release` / `release/*` 流水线使用 Teal 仓库最新成功的一次九平台构建，将各目标工具链嵌入对应 VSIX。
+`pnpm run package:all` 生成全部 9 个平台的 VSIX；`pnpm run package --target darwin-arm64` 生成单个平台包。`pnpm run package` 仍生成通用包，`pnpm run package:windows` 生成 Windows x64 包。普通开发打包不嵌入工具链。GitLab 发布的各平台 VSIX 内置同一上游发布的 Teal 0.2.0 工具链。
 
 受信任工作区会在没有本地完整工具链时自动安装托管工具链；也可以先在 Teal 源码仓库构建：
 
@@ -70,7 +70,7 @@ cargo build --release --locked --package teal --bin teal
 
 `.tl` 使用 Teal 语言服务；`.tli`（包括 `builtin.tli`、`builtins.tli`）使用独立的 Teal Interface 声明高亮，支持 `builtin`、泛型、函数和 task 签名。接口文件不作为可执行源码提交给 LSP，也不显示运行/调试按钮。
 
-无需工具链即可获得静态语法高亮：支持 `@optimization` 等配置属性、自定义及限定名属性、`reflect(...).@Attribute` 投影、函数和类型声明名、常量声明、命名空间、`self`、通配符 `_`，以及字符串插值中的变量和字段路径。实际颜色由主题决定；启用语义高亮后，语言服务器返回的分类可能覆盖静态颜色。
+无需工具链即可获得静态语法高亮，涵盖配置属性、自定义及限定名属性、`symbol.@Attribute` 投影、函数、类型、模块和常量声明、`self`、通配符 `_`，以及字符串插值中的变量和字段路径。实际颜色由主题决定；启用语义高亮后，语言服务器返回的分类可能覆盖静态颜色。
 
 提供补全、诊断、悬停、签名帮助、定义、引用、重命名、文档及工作区符号、格式化和语义高亮。语言行为完全由本地 `teal lsp` 决定；格式化固定使用四空格和 LF，语法不完整时可能返回空编辑。
 
@@ -78,7 +78,7 @@ cargo build --release --locked --package teal --bin teal
 
 Windows 本地启动语言服务器前会将 `teal.exe` 复制到临时目录后以 `lsp` 子命令运行，因此 `teal\target\release` 中的文件不会被语言服务器进程占用，构建期间可以直接替换它。
 
-`teal.lsp.entryFiles` 接受根分析文件数组，相对路径以所属工作区文件夹为基准；工作区外的文件使用父目录。留空时由服务端识别顶层 `fn main()` 或 `task main()`。使用现有 `entryFiles`，不使用已移除的 `entryPoints`。
+`teal.lsp.entryFiles` 接受根分析文件数组，相对路径以所属工作区文件夹为基准；工作区外的文件使用父目录。留空时由服务端识别顶层 `fn main() -> i32` 或 `task main() -> i32`。
 
 每个含已打开 Teal 文档的工作区文件夹有独立语言服务器。嵌套工作区按文档实际归属隔离；打开或关闭文档时重新注册精确文档范围。工作区外的已保存文件按父目录管理，未保存的新文件需要先保存。
 
@@ -127,13 +127,13 @@ Windows 本地启动语言服务器前会将 `teal.exe` 复制到临时目录后
 }
 ```
 
-支持断点、继续/暂停、单步进入/越过/跳出、调用栈、局部变量、复合值展开、监视、变量修改及未处理 RuntimeError 的异常断点。`T | Error` 是普通返回值，不触发异常断点。`console` 可选 `integratedTerminal` 或 `externalTerminal`；插件默认使用集成终端，调试进程的输入输出属于该终端。
+支持断点、继续/暂停、单步进入/越过/跳出、调用栈、局部变量、复合值展开、监视、变量修改及未处理 RuntimeError 的异常断点。Teal 0.2.0 使用 `Result<T, RuntimeError>` 表达可返回的错误。`console` 可选 `integratedTerminal` 或 `externalTerminal`；插件默认使用集成终端，调试进程的输入输出属于该终端。
 
 Launch 支持 `tier`（`embedded`、`hosted`、`agentic`，省略时默认 `agentic`）、`permissionFile`、lint 数组 `allow`/`warn`/`deny`/`forbid`，以及 `compilerDebug`。`permissionFile` 指向已有的权限规则 TOML 文件，相对路径以 `cwd` 为基准；格式和规则由当前工具链校验。未指定时使用工具链的工作区权限配置。`allow` 等数组仅配置 lint，不授予宿主权限。DAP 没有批准交互通道，需要询问的操作会被拒绝。
 
 旧 `runtimeProfile` 已移除，请改为 `tier`；`core`/`native`/`web` 不是有效层级。旧 `allowCapabilities`、`allowReadFiles`、`allowReadDirectories`、`allowWriteFiles`、`allowWriteDirectories`、`allowExecutables`、`allowEnvironment` 已移除，请改用 `permissionFile`。扩展会明确拒绝旧字段，不进行隐式转换。CLI 的旧 `--runtime-profile` 也应改为 `--tier`。
 
-入口由 `fn main()` 或 `task main()` 决定，不支持旧 `entry`；服务端不支持的 `env` 也不接受。调试固定关闭优化并生成调试信息。求值受服务端限制，不能通过监视表达式调用用户函数、宿主或 FFI。不调试运行请使用插件运行命令，而非 Ctrl+F5。
+程序入口为 `fn main() -> i32` 或 `task main() -> i32`。调试固定关闭优化并生成调试信息。求值受服务端限制，不能通过监视表达式调用用户函数、宿主或 FFI。不调试运行请使用插件运行命令，而非 Ctrl+F5。
 
 ### Attach
 

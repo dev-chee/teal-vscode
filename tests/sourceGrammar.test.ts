@@ -33,18 +33,18 @@ test('source attributes cover configuration, custom attributes and reflection pr
         '@allow("unused-private-type") class Point {}',
         '@Route { path: "/" } fn index() {}',
         '@Mode.safe { level: 2 } fn index() {}',
-        'let path = reflect(fn index).@Route.path;',
+        'let path = index.@Route.path;',
         'let attributes=@custom;',
     ]) {
         const attribute = source.match(/@[A-Za-z_][A-Za-z_0-9]*/)![0];
         expectScope(source, attribute, 'entity.other.attribute-name.teal');
         expectScope(source, attribute.slice(1), 'entity.other.attribute-name.teal');
     }
-    for (const source of ['@tools::requires("gpu")', '@tools :: requires("gpu")', 'reflect(index).@web::Route.path']) {
+    for (const source of ['@tools::requires("gpu")', '@tools :: requires("gpu")', 'index.@web::Route.path']) {
         const name = source.includes('requires') ? 'requires' : 'Route';
         expectScope(source, name, 'entity.other.attribute-name.teal');
     }
-    assert.ok(!scopesAt(grammar, 'reflect(index).@Route.path', 'path').includes('entity.other.attribute-name.teal'));
+    assert.ok(!scopesAt(grammar, 'index.@Route.path', 'path').includes('entity.other.attribute-name.teal'));
 });
 
 test('declaration names, receiver, wildcard and namespace paths have dedicated scopes', () => {
@@ -64,6 +64,7 @@ test('declaration names, receiver, wildcard and namespace paths have dedicated s
     expectScope('std::math::abs(-1)', 'std', 'entity.name.namespace.teal');
     expectScope('std::math::abs(-1)', 'math', 'entity.name.namespace.teal');
     expectScope('std::math::abs(-1)', 'abs', 'entity.name.function.teal');
+    expectScope('pub mod geometry;', 'geometry', 'entity.name.namespace.teal');
     for (const word of ['selfish', '_value', 'className', 'identity']) {
         assert.deepEqual(scopesAt(grammar, `let ${word} = 1;`, word), ['source.teal']);
     }
@@ -122,17 +123,23 @@ test('comments and multiline strings isolate attributes and declarations from su
     expectScope('"broken {value";\n@optimization("none");', '@optimization', 'entity.other.attribute-name.teal');
 });
 
-test('existing keyword, literal, label, type and operator coverage remains intact', () => {
-    for (const word of ['if', 'else', 'match', 'for', 'in', 'try', 'catch', 'return', 'break', 'continue', 'loop', 'await']) {
+test('Teal 0.2 keywords, literals, labels, types and operators have dedicated scopes', () => {
+    for (const word of ['if', 'else', 'match', 'for', 'in', 'return', 'break', 'continue', 'loop', 'await']) {
         expectScope(word, word, 'keyword.control.teal');
     }
-    for (const word of ['dylib', 'host', 'import', 'pub', 'impl', 'trait', 'as', 'fn', 'class', 'enum', 'let', 'static', 'const', 'reflect', 'struct', 'type', 'agent', 'task']) {
+    for (const word of ['dylib', 'mod', 'pub', 'impl', 'trait', 'as', 'fn', 'class', 'enum', 'let', 'static', 'const', 'struct', 'type', 'agent', 'task']) {
         expectScope(word, word, 'storage.type.teal');
     }
-    for (const word of ['int', 'float', 'bool', 'string', 'Task', 'Error']) {
+    for (const word of ['i8', 'u8', 'i16', 'u16', 'i32', 'u32', 'i64', 'u64', 'f32', 'f64', 'int', 'float', 'bool', 'char', 'string', 'buffer', 'vec', 'mat', 'Option', 'Result', 'Task', 'RuntimeError', 'Error']) {
         expectScope(word, word, 'support.type.teal');
     }
-    for (const word of ['none', 'true', 'false']) expectScope(word, word, 'constant.language.teal');
+    for (const word of ['true', 'false']) expectScope(word, word, 'constant.language.teal');
+    for (const word of ['host', 'import', 'reflect', 'try', 'catch', 'none']) {
+        assert.deepEqual(scopesAt(grammar, 'let ' + word + ' = 1;', word), ['source.teal']);
+    }
+    for (const literal of ["'x'", "'中'", "'😀'", "'\\u{1F600}'", "'\\''"]) {
+        expectScope(literal, literal, 'string.quoted.single.teal');
+    }
     for (const word of ['42', '0.5', '.5', '2147483648']) expectScope(`-${word}`, word, 'constant.numeric.teal');
     expectScope('1..10', '..', 'keyword.operator.teal');
     expectScope('1..10', '10', 'constant.numeric.teal');

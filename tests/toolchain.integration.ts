@@ -23,7 +23,7 @@ test('CLI receives generated run arguments, Unicode arguments and synchronous te
     try {
         assert.deepEqual(Object.keys((await resolveToolchain(toolchain)).tools), ['teal']);
         const program = path.join(root, '中文 with spaces.tl');
-        await writeFile(program, 'task main() { let args = argv(); if args[0] != "a b" { exit(17); } if args[1] != "中文" { exit(19); } if input() != "stdin value" { exit(18); } }\n');
+        await writeFile(program, 'task main() -> i32 { let args = argv(); if args[0] != "a b" { exit(17); } if args[1] != "中文" { exit(19); } if input() != "stdin value" { exit(18); } return 0; }\n');
         await writeFile(path.join(root, 'permissions.toml'), '[permissions]\nrules = []\n');
         const result = spawnSync(teal, runArguments(program, ['--tier', 'hosted', '--permission-file', 'permissions.toml'], ['a b', '中文']), { cwd: root, input: 'stdin value\n', encoding: 'utf8', timeout: Number(process.env.TEAL_TEST_TIMEOUT_MS ?? 20_000) });
         assert.ifError(result.error);
@@ -38,8 +38,8 @@ test('session coordination refreshes a real parent LSP after saving a nested dep
     await mkdir(path.join(root, 'child'));
     const main = document(path.join(root, 'main.tl'));
     const lib = document(path.join(root, 'child/lib.tl'));
-    await writeFile(main.path, 'use package::child::lib;\nfn main() { let value: int = lib::value(); print(value); }\n');
-    await writeFile(lib.path, 'pub fn value() -> int { return 1; }\n');
+    await writeFile(main.path, 'mod child { pub mod lib; }\nuse package::child::lib;\nfn main() -> i32 { let value: i32 = lib::value(); print(value); return 0; }\n');
+    await writeFile(lib.path, 'pub fn value() -> i32 { return 1; }\n');
     const groups = [{ key: 'parent', root, documents: [main] }, { key: 'child', root: path.dirname(lib.path), documents: [lib] }];
     const sessions = new LanguageSessions({
         groups: () => groups,
@@ -70,7 +70,7 @@ test('session coordination refreshes a real parent LSP after saving a nested dep
         assert.equal(peers[2].group.key, 'parent');
         assert.equal(peers[1].peer.process.exitCode, null);
         const refreshed = await peers[2].peer.wait((message) => message.method === 'textDocument/publishDiagnostics' && message.params?.uri === main.uri);
-        assert.ok(refreshed.params?.diagnostics?.some((diagnostic) => diagnostic.severity === 1 && diagnostic.message.includes('Expected int')));
+        assert.ok(refreshed.params?.diagnostics?.some((diagnostic) => diagnostic.severity === 1 && diagnostic.message.includes('Expected i32')));
     } finally { await sessions.dispose(); await rm(root, { recursive: true, force: true }); }
 });
 
@@ -80,7 +80,7 @@ test('normalized launch options reach real DAP and support stop, stack trace and
     let child: ChildProcess | undefined;
     try {
         const program = path.join(root, 'main.tl');
-        await writeFile(program, 'task main() { let value = 1; print(value); }\n');
+        await writeFile(program, 'task main() -> i32 { let value = 1; print(value); return 0; }\n');
         await writeFile(path.join(root, 'permissions.toml'), '[permissions]\nrules = []\n');
         const config = await prepareDebugConfiguration({ type: 'teal', request: 'launch', name: 'probe', program, tier: 'hosted', permissionFile: 'permissions.toml', stopOnEntry: true }, { baseDirectory: root, documents: [] });
         await peer.response(peer.dap('initialize', { adapterID: 'teal', supportsRunInTerminalRequest: true }));

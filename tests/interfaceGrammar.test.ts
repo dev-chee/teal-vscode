@@ -26,7 +26,7 @@ test('TextMate tokenizes builtin declarations, generics, task signatures and inh
         assert.ok(scopeAt('builtin global {', 'global').includes('entity.name.namespace.teal'));
         assert.ok(scopeAt('builtin impl<T> Task<T> {', 'Task').includes('support.type.teal'));
         assert.ok(scopeAt('    task think<T>(prompt: string) -> T;', 'think').includes('entity.name.function.teal'));
-        assert.ok(scopeAt('    fn checked_int(value: float) -> int | Error;', 'Error').includes('support.type.teal'));
+        assert.ok(scopeAt('    fn checked_int(value: f64) -> Result<i32, RuntimeError>;', 'RuntimeError').includes('support.type.teal'));
         assert.ok(scopeAt('    fn print(values: printable...);', 'printable').includes('support.type.teal'));
         assert.ok(scopeAt('    @compile_time', '@compile_time').includes('entity.other.attribute-name.teal'));
         assert.ok(scopeAt('    @meta::CompileTime', 'CompileTime').includes('entity.other.attribute-name.teal'));

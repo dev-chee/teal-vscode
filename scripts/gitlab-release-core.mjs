@@ -52,21 +52,42 @@ async function preparedSnapshot(api, projectId, pipelineId, sha, apiUrl) {
     } finally { await rm(directory, { recursive: true, force: true }); }
 }
 
-/** 只选择一次最新成功构建；全部目标必须来自同一个 pipeline 和源码 SHA。 */
-export async function resolveSourceBuild(api, apiUrl, project, ref) {
+/** 只选择一次来源；发布标签固定到它记录的 pipeline 和各平台 job。 */
+export async function resolveSourceBuild(api, apiUrl, project, ref, sourceTag) {
     const root = `projects/${encodeURIComponent(project)}`;
-    const pipelines = await api.request(`${root}/pipelines?ref=${encodeURIComponent(ref)}&status=success&order_by=id&sort=desc&per_page=1`);
-    const selected = pipelines?.[0];
-    if (!positiveId(selected?.id) || selected.status !== 'success' || selected.ref !== ref || !shaPattern.test(selected.sha)) {
-        throw new Error('No successful Teal pipeline exists for the selected ref.');
+    let snapshot, selected;
+    if (sourceTag) {
+        const version = sourceTag.replace(/^toolchain-v/, '');
+        if (!stableVersion.test(version) || sourceTag !== `toolchain-v${version}`) throw new Error('Invalid Teal release tag.');
+        const tag = await api.request(`${root}/repository/tags/${encodeURIComponent(sourceTag)}`);
+        snapshot = JSON.parse(tag?.message ?? 'null');
+        if (tag?.name !== sourceTag || snapshot?.formatVersion !== 1 || snapshot.version !== version
+            || !positiveId(snapshot.projectId) || !positiveId(snapshot.pipelineId) || !shaPattern.test(snapshot.sha)
+            || tag.commit?.id !== snapshot.sha || typeof snapshot.refName !== 'string' || !snapshot.refName
+            || targets.some(target => !positiveId(snapshot.jobs?.[target]))
+            || Object.keys(snapshot.jobs).length !== targets.length || new Set(Object.values(snapshot.jobs)).size !== targets.length) {
+            throw new Error('Invalid Teal release tag provenance.');
+        }
+        ref = snapshot.refName;
+        selected = await api.request(`${root}/pipelines/${snapshot.pipelineId}`);
+        if (selected?.id !== snapshot.pipelineId || selected.project_id !== snapshot.projectId || selected.sha !== snapshot.sha) {
+            throw new Error('Teal pipeline identity does not match the release tag.');
+        }
+    } else {
+        const pipelines = await api.request(`${root}/pipelines?ref=${encodeURIComponent(ref)}&status=success&order_by=id&sort=desc&per_page=1`);
+        selected = pipelines?.[0];
     }
-    const jobs = await api.list(`${root}/pipelines/${selected.id}/jobs?scope[]=success`);
+    if (!positiveId(selected?.id) || selected.status !== 'success' || selected.ref !== ref || !shaPattern.test(selected.sha)) {
+        throw new Error('No successful Teal pipeline matches the selected source.');
+    }
+    const jobs = await api.list(`${root}/pipelines/${selected.id}/jobs?scope[]=success${snapshot ? '&include_retried=true' : ''}`);
     const inputs = {};
     for (const target of targets) {
-        const matches = jobs.filter(job => job.name === `build_release_${target.replaceAll('-', '_')}`);
+        const matches = jobs.filter(job => job.name === `build_release_${target.replaceAll('-', '_')}`
+            && (!snapshot || job.id === snapshot.jobs[target]));
         if (matches.length !== 1 || !positiveId(matches[0].id) || matches[0].status !== 'success'
             || matches[0].pipeline?.id !== selected.id || matches[0].commit?.id !== selected.sha || !matches[0].artifacts_file?.filename) {
-            throw new Error(`Latest Teal pipeline lacks a valid ${target} artifact; refusing to mix builds.`);
+            throw new Error(`Selected Teal pipeline lacks a valid ${target} artifact; refusing to mix builds.`);
         }
         inputs[target] = matches[0].id;
     }
@@ -76,6 +97,7 @@ export async function resolveSourceBuild(api, apiUrl, project, ref) {
     const versionSection = inherited ? /^\[workspace\.package\][^\n]*\n([\s\S]*?)(?=^\[|(?![\s\S]))/m.exec(cargo)?.[1] : section;
     const version = /^version\s*=\s*"([^"]+)"/m.exec(versionSection ?? '')?.[1];
     if (!stableVersion.test(version ?? '')) throw new Error('Teal package version is missing or unsupported.');
+    if (snapshot && version !== snapshot.version) throw new Error('Teal package version does not match the release tag.');
     return { apiUrl, project, ref, pipelineId: selected.id, sha: selected.sha, version, jobs: inputs };
 }
 
@@ -97,7 +119,7 @@ export function validateReleasePlan(plan, expectedSha) {
 }
 
 /** 完整历史由 CI GIT_DEPTH=0 提供；已成功打标的提交复用标注中的全部来源。 */
-export async function prepareRelease({ api, apiUrl, sourceProject, sourceRef, projectId, pipelineId, ref, sha, initialVersion, cwd = process.cwd() }) {
+export async function prepareRelease({ api, apiUrl, sourceProject, sourceRef, sourceTag, projectId, pipelineId, ref, sha, initialVersion, cwd = process.cwd() }) {
     const git = (...args) => execFileSync('git', args, { cwd, encoding: 'utf8' }).trim();
     if (git('rev-parse', 'HEAD') !== sha || !/^release(\/|$)/.test(ref)) throw new Error('Release requires the checked-out release branch commit.');
     const all = git('tag', '--list', 'v*').split(/\r?\n/).filter(tag => stableVersion.test(tag.slice(1)));
@@ -122,7 +144,7 @@ export async function prepareRelease({ api, apiUrl, sourceProject, sourceRef, pr
     }
     const nearest = merged.length ? git('describe', '--tags', '--abbrev=0', ...merged.flatMap(tag => ['--match', tag])) : undefined;
     const version = nextVersion(nearest, initialVersion, all);
-    const source = await resolveSourceBuild(api, apiUrl, sourceProject, sourceRef);
+    const source = await resolveSourceBuild(api, apiUrl, sourceProject, sourceRef, sourceTag);
     return validateReleasePlan({ formatVersion: 1, extension: { projectId, pipelineId, ref, sha, version, tag: `v${version}` }, source }, sha);
 }
 

@@ -65,7 +65,7 @@ export function run(): Promise<void> {
             const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-host-')));
             try {
                 const source = path.join(root, '中文 path.tl');
-                await writeFile(source, 'fn main() { print("ok"); }\n');
+                await writeFile(source, 'fn main() -> i32 { print("ok"); return 0; }\n');
                 const document = await vscode.workspace.openTextDocument(vscode.Uri.file(source));
                 assert.equal(document.languageId, 'teal');
                 await vscode.window.showTextDocument(document);
@@ -110,7 +110,7 @@ export function run(): Promise<void> {
             try {
                 const source = path.join(root, 'main.tl');
                 const permissionFile = path.join(root, '权限 with spaces.toml');
-                await writeFile(source, 'task main() {}\n');
+                await writeFile(source, 'task main() -> i32 { return 0; }\n');
                 await writeFile(permissionFile, '[permissions]\nrules = []\n');
                 const configurations = new DebugConfigurations();
                 for (const tier of ['embedded', 'hosted', 'agentic']) {
@@ -138,10 +138,11 @@ export function run(): Promise<void> {
             const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-lsp-')));
             try {
                 const source = path.join(root, '中文 space [lsp].tl');
-                await writeFile(source, 'fn helper(value: int) -> int { return value; }\nfn main() { let answer = helper(1); }\n');
+                await writeFile(source, 'fn helper(value: i32) -> i32 { return value; }\nfn main() -> i32 { let answer = helper(1); return answer; }\n');
                 const document = await vscode.workspace.openTextDocument(vscode.Uri.file(source));
                 await vscode.window.showTextDocument(document);
-                const position = new vscode.Position(1, 28);
+                const helperStart = document.lineAt(1).text.indexOf('helper');
+                const position = new vscode.Position(1, helperStart + 4);
                 await waitFor(async () => {
                     const completion = await vscode.commands.executeCommand<vscode.CompletionList | vscode.CompletionItem[]>('vscode.executeCompletionItemProvider', document.uri, position);
                     const labels = Array.isArray(completion) ? completion.map((item) => item.label) : completion?.items.map((item) => item.label);
@@ -165,8 +166,8 @@ export function run(): Promise<void> {
                 assert.ok(edits && edits.length > 0, 'formatting provider must produce the canonical document edits');
                 const semantic = await vscode.commands.executeCommand<vscode.SemanticTokens>('vscode.provideDocumentSemanticTokens', document.uri);
                 assert.ok(semantic && semantic.data.length >= 10, 'semantic tokens must encode declarations and uses');
-                const signature = await vscode.commands.executeCommand<vscode.SignatureHelp>('vscode.executeSignatureHelpProvider', document.uri, new vscode.Position(1, 32));
-                assert.equal(signature?.signatures[0]?.label, 'fn helper(value: int) -> int', 'signature help must expose the declared Teal signature');
+                const signature = await vscode.commands.executeCommand<vscode.SignatureHelp>('vscode.executeSignatureHelpProvider', document.uri, new vscode.Position(1, helperStart + 'helper(1'.length));
+                assert.equal(signature?.signatures[0]?.label, 'fn helper(value: i32) -> i32', 'signature help must expose the declared Teal signature');
                 const rename = await vscode.commands.executeCommand<vscode.WorkspaceEdit>('vscode.executeDocumentRenameProvider', document.uri, position, 'renamed');
                 const renamed = rename?.get(document.uri) ?? [];
                 assert.equal(renamed.length, 2, 'rename must edit both declaration and call');
@@ -174,7 +175,7 @@ export function run(): Promise<void> {
 
                 const editor = vscode.window.activeTextEditor;
                 assert.ok(editor && editor.document.uri.toString() === document.uri.toString());
-                await editor.edit((builder) => builder.replace(new vscode.Range(1, 24, 1, 30), 'missing_name'));
+                await editor.edit((builder) => builder.replace(new vscode.Range(1, helperStart, 1, helperStart + 'helper'.length), 'missing_name'));
                 const diagnostics = await waitFor(async () => {
                     const items = vscode.languages.getDiagnostics(document.uri);
                     return items.find((item) => /missing_name|unknown|unresolved/i.test(item.message));
@@ -196,7 +197,7 @@ export function run(): Promise<void> {
             const appManifest = (relative: string) => manifest('app', 'main.tl')
                 + `[dependencies]\ndep = { path = "${relative}", version = "1.0.0" }\n`;
             const errors = () => vscode.languages.getDiagnostics(main).filter(item => item.severity === vscode.DiagnosticSeverity.Error);
-            const mismatch = (type: string) => errors().some(item => item.message.includes('Expected int') && item.message.includes(`type is ${type}`));
+            const mismatch = (type: string) => errors().some(item => item.message.includes(`Expected i32, found ${type}`));
             const primeWatcher = (file: string) => waitForWatcher(
                 () => writeFile(file, 'pub fn value() -> bool { return true; }\n'),
                 () => mismatch('bool'),
@@ -207,9 +208,9 @@ export function run(): Promise<void> {
                 await writeFile(path.join(app, 'package.toml'), appManifest('../dep'));
                 await writeFile(path.join(root, 'dep/package.toml'), manifest('dep', 'lib.tl'));
                 await writeFile(path.join(root, 'replacement/package.toml'), manifest('dep', 'lib.tl'));
-                await writeFile(dependency, 'pub fn value() -> int { return 1; }\n');
-                await writeFile(replacement, 'pub fn value() -> int { return 2; }\n');
-                await writeFile(main.fsPath, 'use dep::lib;\nfn main() {\n    let value: int = lib::value();\n    print(value);\n}\n');
+                await writeFile(dependency, 'pub fn value() -> i32 { return 1; }\n');
+                await writeFile(replacement, 'pub fn value() -> i32 { return 2; }\n');
+                await writeFile(main.fsPath, 'use ::dep as lib;\nfn main() -> i32 {\n    let value: i32 = lib::value();\n    print(value);\n    return 0;\n}\n');
                 await vscode.workspace.getConfiguration('teal').update('toolchain.path', process.env.TEAL_TOOLCHAIN_PATH!, vscode.ConfigurationTarget.Global);
                 await updateFolders(anchorCount, 0, { uri: vscode.Uri.file(app), name: 'consumer' });
                 await waitFor(async () => vscode.workspace.workspaceFolders?.some(folder => folder.uri.fsPath.toLowerCase() === app.toLowerCase()) ? true : undefined, 'consumer workspace must be added');
@@ -225,15 +226,18 @@ export function run(): Promise<void> {
 
                 // 首次导航可能早于外部目录系统监听的安装，先用独特诊断确认完整事件链路。
                 await primeWatcher(dependency);
-                await writeFile(dependency, 'pub fn value() -> int { return 1; }\n');
+                await writeFile(dependency, 'pub fn value() -> i32 { return 1; }\n');
                 await waitFor(async () => errors().length === 0 ? true : undefined, 'watcher probe must recover before the single save');
-                await writeFile(dependency, 'pub fn padding() -> int { return 0; }\npub fn value() -> string { return "changed"; }\n');
+                await writeFile(dependency, 'pub fn padding() -> i32 { return 0; }\npub fn value() -> string { return "changed"; }\n');
                 await waitFor(async () => mismatch('string') ? true : undefined, 'external save must refresh consumer diagnostics without restart');
-                assert.equal((await definition())?.[0]?.range.start.line, 1, 'navigation must use the changed dependency text');
+                await writeFile(dependency, 'pub fn padding() -> i32 { return 0; }\npub fn value() -> i32 { return 1; }\n');
+                await waitFor(async () => (await definition())?.[0]?.range.start.line === 1 ? true : undefined,
+                    'navigation must use the updated declaration after the consumer type checks');
 
                 await rm(dependency);
-                await waitFor(async () => errors().some(item => /module|source|not found|cannot|missing/i.test(item.message)) ? true : undefined, 'deleted external dependency must invalidate its consumer');
-                await writeFile(dependency, 'pub fn value() -> int { return 3; }\n');
+                await waitFor(async () => errors().some(item => /module|source|not found|cannot|missing|no such file or directory/i.test(item.message)) ? true : undefined,
+                    'deleted external dependency must invalidate its consumer');
+                await writeFile(dependency, 'pub fn value() -> i32 { return 3; }\n');
                 await waitFor(async () => errors().length === 0 ? true : undefined, 'recreated external dependency must recover without restart');
 
                 await writeFile(path.join(app, 'package.toml'), appManifest('../replacement'));
@@ -308,7 +312,7 @@ export function run(): Promise<void> {
                 const name = '中文 # [uri].tl';
                 const source = path.join(root, name);
                 const anchorCount = vscode.workspace.workspaceFolders?.length ?? 0;
-                const text = 'fn helper(value: int) -> int { return value; }\nfn main() { print(helper(1)); }\n';
+                const text = 'fn helper(value: i32) -> i32 { return value; }\nfn main() -> i32 { print(helper(1)); return 0; }\n';
                 try {
                     await mkdir(actual);
                     if (linked) await symlink(actual, root, 'junction');
@@ -351,25 +355,24 @@ export function run(): Promise<void> {
             const nested = path.join(root, 'child');
             const outer = vscode.Uri.file(path.join(root, 'outer.tl'));
             const inner = vscode.Uri.file(path.join(nested, 'inner.tl'));
-            const probe = vscode.Uri.file(path.join(root, 'probe.tli'));
+            const probe = vscode.Uri.file(path.join(root, 'probe.tl'));
             const anchorCount = vscode.workspace.workspaceFolders?.length ?? 0;
             const errors = (uri: vscode.Uri) => vscode.languages.getDiagnostics(uri).filter(item => item.severity === vscode.DiagnosticSeverity.Error);
             try {
                 await mkdir(nested);
-                await writeFile(outer.fsPath, 'fn main() { print(1); }\n');
-                await writeFile(inner.fsPath, 'fn main() { print(missing_child_name); }\n');
+                await writeFile(outer.fsPath, 'mod child { pub mod inner; }\nfn main() -> i32 { return child::inner::value(); }\n');
+                await writeFile(inner.fsPath, 'pub fn value() -> i32 { return missing_child_name; }\nfn main() -> i32 { return value(); }\n');
+                await writeFile(probe.fsPath, 'fn main() -> i32 { return missing_parent_name; }\n');
                 await vscode.workspace.getConfiguration('teal').update('toolchain.path', process.env.TEAL_TOOLCHAIN_PATH!, vscode.ConfigurationTarget.Global);
                 await updateFolders(anchorCount, 0, { uri: vscode.Uri.file(root), name: 'parent' }, { uri: vscode.Uri.file(nested), name: 'child' });
+                await vscode.workspace.openTextDocument(probe);
                 await vscode.window.showTextDocument(await vscode.workspace.openTextDocument(outer));
-                await waitFor(async () => (await vscode.commands.executeCommand<vscode.DocumentSymbol[]>('vscode.executeDocumentSymbolProvider', outer))?.some(item => item.name === 'main') ? true : undefined,
-                    'the parent client must be running');
-                await waitForWatcher(() => writeFile(probe.fsPath, 'builtin global { fn broken( }\n'),
-                    () => errors(probe).length > 0 && errors(inner).some(item => item.message.includes('missing_child_name')),
-                    'the parent must initially publish its closed child diagnostic');
+                await waitFor(async () => errors(probe).some(item => item.message.includes('missing_parent_name')) ? true : undefined,
+                    'the parent client must publish its own diagnostic');
+                await waitFor(async () => errors(inner).some(item => item.message.includes('missing_child_name')) ? true : undefined,
+                    'the parent must publish a diagnostic for its closed file module');
                 const document = await vscode.workspace.openTextDocument(inner);
                 const editor = await vscode.window.showTextDocument(document);
-                await waitFor(async () => (await vscode.commands.executeCommand<vscode.DocumentSymbol[]>('vscode.executeDocumentSymbolProvider', inner))?.some(item => item.name === 'main') ? true : undefined,
-                    'the child client must take ownership');
                 await waitFor(async () => errors(inner).some(item => item.message.includes('missing_child_name')) ? true : undefined,
                     'the child client must publish its initial diagnostic');
                 const before = errors(inner).length;
@@ -379,6 +382,8 @@ export function run(): Promise<void> {
                 await waitFor(async () => errors(inner).length < before ? true : undefined, 'the child client must clear its current diagnostic');
                 assert.deepEqual(errors(inner), [], 'the parent must not retain its old disk diagnostic');
                 assert.ok(errors(probe).length > 0, 'the parent must retain diagnostics it still owns');
+                await waitFor(async () => (await vscode.commands.executeCommand<vscode.DocumentSymbol[]>('vscode.executeDocumentSymbolProvider', inner))?.some(item => item.name === 'main') ? true : undefined,
+                    'the child client must return symbols after the buffer is valid');
                 await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
             } finally {
                 await vscode.commands.executeCommand('workbench.action.revertAndCloseActiveEditor');
@@ -466,7 +471,7 @@ export function run(): Promise<void> {
                 },
             });
             try {
-                await writeFile(source, 'fn main() {\n    let value = 1;\n    let next_value = value + 1;\n    print(next_value);\n}\n');
+                await writeFile(source, 'fn main() -> i32 {\n    let value = 1;\n    let next_value = value + 1;\n    print(next_value);\n    return 0;\n}\n');
                 await writeFile(path.join(root, 'permissions.toml'), '[permissions]\nrules = []\n');
                 vscode.debug.addBreakpoints([new vscode.SourceBreakpoint(new vscode.Location(vscode.Uri.file(source), new vscode.Position(1, 4)))]);
                 assert.equal(await vscode.debug.startDebugging(undefined, {
@@ -549,7 +554,7 @@ export function run(): Promise<void> {
                 },
             });
             try {
-                await writeFile(source, 'fn main() {\n    let value = 1;\n    print(value);\n}\n');
+                await writeFile(source, 'fn main() -> i32 {\n    let value = 1;\n    print(value);\n    return 0;\n}\n');
                 vscode.debug.addBreakpoints([new vscode.SourceBreakpoint(new vscode.Location(vscode.Uri.file(source), new vscode.Position(2, 4)))]);
                 assert.equal(await vscode.debug.startDebugging(undefined, {
                     type: 'teal', request: 'launch', name: 'DAP external terminal', program: source,
@@ -588,7 +593,7 @@ export function run(): Promise<void> {
                 });
             });
             try {
-                await writeFile(source, 'task main() {\n    let args = argv();\n    if args[0] != "argument with spaces" { exit(17); }\n    if args[1] != "中文 argument" { exit(19); }\n    if input() != "stdin value" { exit(18); }\n}\n');
+                await writeFile(source, 'task main() -> i32 {\n    let args = argv();\n    if args[0] != "argument with spaces" { exit(17); }\n    if args[1] != "中文 argument" { exit(19); }\n    if input() != "stdin value" { exit(18); }\n    return 0;\n}\n');
                 await vscode.workspace.getConfiguration('teal', vscode.Uri.file(source)).update('run.args', ['argument with spaces', '中文 argument'], vscode.ConfigurationTarget.Global);
                 taskExecution = await vscode.commands.executeCommand<vscode.TaskExecution>('teal.runFile', vscode.Uri.file(source));
                 assert.ok(taskExecution, 'teal.runFile must return the started ProcessExecution task');
@@ -619,7 +624,7 @@ export function run(): Promise<void> {
                 },
             });
             try {
-                await writeFile(source, 'fn main() {\n    let value = 1;\n    print(value);\n}\n');
+                await writeFile(source, 'fn main() -> i32 {\n    let value = 1;\n    print(value);\n    return 0;\n}\n');
                 const child = spawn(path.join(process.env.TEAL_TOOLCHAIN_PATH!, executableName('teal')), [
                     'dap', '--debuggee', '--listen', `127.0.0.1:${port}`, '--token', token, '--program', source, '--stop-on-entry',
                 ], { cwd: root, windowsHide: true, stdio: ['ignore', 'pipe', 'pipe'] });

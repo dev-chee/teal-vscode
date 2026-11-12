@@ -74,13 +74,14 @@ export async function run(): Promise<void> {
         const folder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? path.join(root, 'project');
         await mkdir(folder, { recursive: true });
         const file = path.join(folder, 'recovery.tl');
-        await writeFile(file, 'fn helper(value: int) -> int { return value; }\nfn main() { print(helper(42)); }\n');
+        await writeFile(file, 'fn helper(value: i32) -> i32 { return value; }\nfn main() -> i32 { print(helper(42)); return 0; }\n');
         const document = await vscode.workspace.openTextDocument(file);
+        const helperPosition = new vscode.Position(1, document.lineAt(1).text.indexOf('helper') + 2);
         await vscode.window.showTextDocument(document);
         const hover = async () => {
             const deadline = Date.now() + 30_000;
             while (Date.now() < deadline) {
-                const result = await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', document.uri, new vscode.Position(1, 20));
+                const result = await vscode.commands.executeCommand<vscode.Hover[]>('vscode.executeHoverProvider', document.uri, helperPosition);
                 if (result?.length) return;
                 await new Promise(resolve => setTimeout(resolve, 100));
             }

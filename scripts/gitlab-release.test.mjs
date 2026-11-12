@@ -89,6 +89,31 @@ test('latest source snapshot binds all nine target artifacts to one successful p
     assert.throws(() => validateReleasePlan(plan(), 'f'.repeat(40)), /commit mismatch/);
 });
 
+test('a published Teal tag pins its original jobs even after a job is retried', async () => {
+    const api = sourceApi();
+    const { pipelineId, sha, version, jobs } = sourceBuild();
+    const tag = { name: `toolchain-v${version}`, commit: { id: sha },
+        message: JSON.stringify({ formatVersion: 1, projectId: 12, pipelineId, sha, refName: 'release', version, jobs }) };
+    const pipeline = { id: pipelineId, project_id: 12, ref: 'release', sha, status: 'success' };
+    const request = api.request;
+    api.request = async route => {
+        if (route.endsWith(`/repository/tags/${tag.name}`)) return tag;
+        if (route.endsWith(`/pipelines/${pipelineId}`)) return pipeline;
+        if (route.includes('/pipelines?')) throw new Error('must not consult latest');
+        return request(route);
+    };
+    api.jobs.unshift({ ...api.jobs[0], id: 9999 });
+    const resolve = () => resolveSourceBuild(api, apiUrl, 'group/teal', 'ignored-when-pinned', tag.name);
+    assert.deepEqual(await resolve(), sourceBuild());
+    assert.match(api.calls[0], /include_retried=true/);
+    api.jobs.splice(1, 1);
+    await assert.rejects(resolve(), /lacks a valid win32-x64 artifact/);
+    pipeline.sha = 'c'.repeat(40);
+    await assert.rejects(resolve(), /pipeline identity does not match/);
+    tag.commit.id = pipeline.sha;
+    await assert.rejects(resolve(), /invalid Teal release tag provenance/i);
+});
+
 test('retrying the same successful commit reuses its annotated version and source snapshot without resolving latest again', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'teal-release-history-'));
     const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim();
