@@ -17,12 +17,12 @@
 
 ## Teal 构建来源
 
-当前发布配置锁定上游 `toolchain-v0.2.0`。发布下一版工具链时，在 `.gitlab/release.yml` 更新 `TEAL_SOURCE_TAG`。未配置标签时，从 `TEAL_SOURCE_REF` 选择最新成功的构建。
+当前发布配置锁定上游 `toolchain-v0.2.1`。发布下一版工具链时，在 `.gitlab/release.yml` 更新 `TEAL_SOURCE_TAG`。未配置标签时，从 `TEAL_SOURCE_REF` 选择最新成功的构建。
 
 | 变量 | 默认值 | 用途 |
 | --- | --- | --- |
 | `TEAL_SOURCE_PROJECT` | `public-platform/teal-ai/teal` | Teal GitLab 项目完整路径 |
-| `TEAL_SOURCE_TAG` | `toolchain-v0.2.0` | 上游 GitLab 的标注发布标签，固定流水线、源码提交和九个 job ID |
+| `TEAL_SOURCE_TAG` | `toolchain-v0.2.1` | 上游 GitLab 的标注发布标签，固定流水线、源码提交和九个 job ID |
 | `TEAL_SOURCE_REF` | `release` | 未设置发布标签时，选择此分支的最新成功构建 |
 
 插件直接消费 Teal CI 的交叉构建结果。每个目标来自该次 pipeline 的 `build_release_*` job，文件为 `target/dist/teal-<源码包版本>-<Rust目标>.zip` 或 `.tar.gz`。缺少任何目标时失败。
@@ -71,7 +71,7 @@ git push funplus HEAD:refs/heads/release
 如果需要覆盖本次固定的上游标签，可在项目变量中设置 `TEAL_SOURCE_TAG`，或在允许传入流水线变量时使用：
 
 ```powershell
-git push funplus HEAD:refs/heads/release -o ci.variable="TEAL_SOURCE_TAG=toolchain-v0.2.0"
+git push funplus HEAD:refs/heads/release -o ci.variable="TEAL_SOURCE_TAG=toolchain-v0.2.1"
 ```
 
 不要手动推送 `v*` 标签来启动发布。网页新建 release 流水线不触发发布；失败后重试原父/子流水线对应 jobs。重试准备 job 不会重新分配版本或来源；同一次子流水线的旧目标包因此仍匹配同一指纹。升级到本门禁后，缺少包内计划指纹的旧 VSIX 必须重新打包。若标签已创建但 Marketplace 只完成部分目标，重试发布器会跳过已发布目标，继续剩余目标，保留相同版本与工具链来源。
