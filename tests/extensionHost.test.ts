@@ -17,8 +17,8 @@ export function run(): Promise<void> {
     mocha.suite.timeout(60_000);
 
     suite('Teal extension host', () => {
-        async function waitFor<T>(action: () => Promise<T | undefined>, message: string): Promise<T> {
-            const deadline = Date.now() + 12_000;
+        async function waitFor<T>(action: () => Promise<T | undefined>, message: string, timeoutMs = 12_000): Promise<T> {
+            const deadline = Date.now() + timeoutMs;
             let result: T | undefined;
             while (Date.now() < deadline) {
                 result = await action();
@@ -71,7 +71,9 @@ export function run(): Promise<void> {
                 await vscode.window.showTextDocument(document);
                 const extension = vscode.extensions.getExtension('dev-chee.teal-vscode');
                 assert.ok(extension, 'extension must be discoverable by its published identifier');
-                await waitFor(async () => extension.isActive ? extension : undefined, 'opening a Teal document must activate the extension without extension.activate()');
+                // CI 首次启动刚下载的 VS Code 时，工作台初始化可能超过普通 LSP 探针的等待时间。
+                await waitFor(async () => extension.isActive ? extension : undefined,
+                    'opening a Teal document must activate the extension without extension.activate()', 40_000);
                 for (const command of ['teal.restartServer', 'teal.installToolchain', 'teal.runFile', 'teal.debugFile', 'teal.showOutput', 'teal.openSettings']) {
                     assert.ok((await vscode.commands.getCommands(true)).includes(command), `${command} must be registered after language activation`);
                 }
