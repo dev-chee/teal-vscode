@@ -47,7 +47,14 @@ prepare_release:
     - node scripts/gitlab-release.mjs apply-version
     - node scripts/gitlab-toolchain.mjs --target "$DIST_TARGET"
     - export TEAL_TOOLCHAIN_PATH="$(cat target/toolchain-path.txt)"
-    - node scripts/test-release.mjs --target "$DIST_TARGET"
+    - |
+      if [ "$DIST_TARGET" = linux-x64 ] && [ -z "${TEAL_VSCODE_TEST_CACHE:-}" ] && [ -z "${VSCODE_EXECUTABLE_PATH:-}" ]; then
+        # 下载与解压使用当前任务独占的目录，避免 checkout 清理影响测试宿主。
+        TEAL_VSCODE_TEST_CACHE="$(mktemp -d)"
+        export TEAL_VSCODE_TEST_CACHE
+        trap 'rm -rf -- "$TEAL_VSCODE_TEST_CACHE"' EXIT
+      fi
+      node scripts/test-release.mjs --target "$DIST_TARGET"
     - node scripts/package.mjs --target "$DIST_TARGET" --toolchain-path-file target/toolchain-path.txt --release-plan-file target/release.json
 
 .release_windows_package:
