@@ -35,9 +35,10 @@ test('session coordination refreshes a real parent LSP after saving a nested dep
     const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-lsp-integration-')));
     const peers: Array<{ group: LanguageGroup; peer: ProtocolPeer }> = [];
     const errors: unknown[] = [];
-    await mkdir(path.join(root, 'child'));
-    const main = document(path.join(root, 'main.tl'));
-    const lib = document(path.join(root, 'child/lib.tl'));
+    await mkdir(path.join(root, 'src/child'), { recursive: true });
+    await writeFile(path.join(root, 'package.toml'), 'format = 11\nname = "lsp-integration"\nversion = "1.0.0"\nlanguage_edition = "2026"\n[target]\nkind = "bin"\npath = "main.tl"\n[dependencies]\nstd = { builtin = true }\n');
+    const main = document(path.join(root, 'src/main.tl'));
+    const lib = document(path.join(root, 'src/child/lib.tl'));
     await writeFile(main.path, 'mod child { pub mod lib; }\nuse package::child::lib;\nfn main() -> i32 { let value: i32 = lib::value(); print(value); return 0; }\n');
     await writeFile(lib.path, 'pub fn value() -> i32 { return 1; }\n');
     const groups = [{ key: 'parent', root, documents: [main] }, { key: 'child', root: path.dirname(lib.path), documents: [lib] }];
@@ -60,7 +61,7 @@ test('session coordination refreshes a real parent LSP after saving a nested dep
         await sessions.refresh();
         assert.deepEqual(errors, []);
         const initial = await peers[0].peer.wait((message) => message.method === 'textDocument/publishDiagnostics' && message.params?.uri === main.uri);
-        assert.ok(!initial.params?.diagnostics?.some((diagnostic) => diagnostic.severity === 1));
+        assert.ok(!initial.params?.diagnostics?.some((diagnostic) => diagnostic.severity === 1), JSON.stringify(initial.params?.diagnostics));
         await writeFile(lib.path, 'pub fn value() -> string { return "changed"; }\n');
         peers[1].peer.send({ jsonrpc: '2.0', method: 'textDocument/didChange', params: { textDocument: { uri: lib.uri, version: 2 }, contentChanges: [{ text: await readFile(lib.path, 'utf8') }] } });
         sessions.diskChanged(lib);

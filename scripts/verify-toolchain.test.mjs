@@ -7,8 +7,40 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import test from 'node:test';
 import { archiveName, targets } from './toolchain-release.mjs';
-import { validateToolchainArchiveListing, validateToolchainArchiveTypes } from '../src/toolchainDistributionCore.cjs';
+import { validateToolchainArchiveListing, validateToolchainArchiveTypes, verifyToolchainDistribution } from '../src/toolchainDistributionCore.cjs';
 import { writeRuntimeFixture } from '../tests/helpers/toolchainFixture.cjs';
+
+test('Teal 0.3 standard library interfaces are verified without the legacy builtins path', async t => {
+    const root = await mkdtemp(path.join(tmpdir(), 'teal-runtime-layout-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const target = process.platform === 'win32' ? 'win32-x64' : 'linux-x64';
+    const executable = target.startsWith('win32-') ? 'teal.exe' : 'teal';
+    const content = Buffer.from('fixture executable, never executed');
+    await writeFile(path.join(root, executable), content, { mode: 0o755 });
+    const files = [{ path: executable, size: content.length, sha256: createHash('sha256').update(content).digest('hex') }];
+    const interfaces = {
+        'runtime/packages/std/src/builtin.tli': 'builtin global {}\n',
+        'runtime/packages/std/src/host.tli': 'host interface\n',
+        'runtime/packages/std/src/agentic.tli': 'agentic interface\n',
+        'runtime/packages/std/src/lib.tl': 'pub fn label() -> string { return "label"; }\n',
+    };
+    await writeRuntimeFixture(root, files, interfaces);
+    const legacy = 'runtime/packages/std/builtins.tli';
+    await rm(path.join(root, legacy));
+    const manifest = { formatVersion: 1, files: files.filter(file => file.path !== legacy) };
+    const save = value => writeFile(path.join(root, 'manifest.json'), JSON.stringify(value));
+    await save(manifest);
+    assert.equal(await verifyToolchainDistribution(root, target), await realpath(root));
+    for (const [file, source] of Object.entries(interfaces)) {
+        await rm(path.join(root, file));
+        await save({ ...manifest, files: manifest.files.filter(entry => entry.path !== file) });
+        await assert.rejects(verifyToolchainDistribution(root, target), /Missing runtime resources/);
+        await writeFile(path.join(root, file), source);
+    }
+    await save(manifest);
+    await writeFile(path.join(root, 'runtime/packages/std/src/host.tli'), 'corrupted interface');
+    await assert.rejects(verifyToolchainDistribution(root, target), /Distribution digest mismatch/);
+});
 
 test('archive listings accept Rust tar directory entries without trailing slashes', () => {
     const root = 'teal-0.1.2-x86_64-unknown-linux-musl';

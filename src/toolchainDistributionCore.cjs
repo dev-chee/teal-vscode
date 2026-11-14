@@ -7,7 +7,13 @@ const path = require('node:path');
 const distribution = require('./toolchain-targets.json');
 // 发行版只携带一个 teal 可执行文件；LSP、DAP 和格式化由它的子命令提供。
 const tools = ['teal'];
-const requiredRuntime = ['runtime/packages/catalog.toml', 'runtime/packages/std/package.toml', 'runtime/packages/std/builtins.tli'];
+const requiredRuntime = ['runtime/packages/catalog.toml', 'runtime/packages/std/package.toml'];
+// Teal 0.3 将内建、宿主和 Agent 接口统一放入 src；旧版托管安装仍需校验。
+const standardLibraryLayouts = [
+    ['runtime/packages/std/builtins.tli'],
+    ['runtime/packages/std/src/builtin.tli', 'runtime/packages/std/src/host.tli',
+        'runtime/packages/std/src/agentic.tli', 'runtime/packages/std/src/lib.tl'],
+];
 const validationConcurrency = 16;
 const hashingConcurrency = 8;
 
@@ -140,6 +146,7 @@ async function verifyToolchainDistribution(directory, target) {
         throw new Error('Missing distribution files.');
     }
     if (requiredRuntime.some(name => !seen.has(name))
+        || !standardLibraryLayouts.some(layout => layout.every(name => seen.has(name)))
         || ![...seen].some(name => name.startsWith('runtime/packages/') && name.endsWith('.tl'))) {
         throw new Error('Missing runtime resources or Teal sources.');
     }

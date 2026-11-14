@@ -195,9 +195,9 @@ export function run(): Promise<void> {
             const replacement = path.join(root, 'replacement/src/lib.tl');
             const main = vscode.Uri.file(path.join(app, 'src/main.tl'));
             const anchorCount = vscode.workspace.workspaceFolders?.length ?? 0;
-            const manifest = (name: string, module: string) => `format = 10\nname = "${name}"\nversion = "1.0.0"\nlanguage_edition = "2026"\nmodules = ["${module}"]\n`;
+            const manifest = (name: string, module: string) => `format = 11\nname = "${name}"\nversion = "1.0.0"\nlanguage_edition = "2026"\n[target]\nkind = "${module === 'main.tl' ? 'bin' : 'lib'}"\npath = "${module}"\n`;
             const appManifest = (relative: string) => manifest('app', 'main.tl')
-                + `[dependencies]\ndep = { path = "${relative}", version = "1.0.0" }\n`;
+                + `[dependencies]\nstd = { builtin = true }\ndep = { path = "${relative}", version = "1.0.0" }\n`;
             const errors = () => vscode.languages.getDiagnostics(main).filter(item => item.severity === vscode.DiagnosticSeverity.Error);
             const mismatch = (type: string) => errors().some(item => item.message.includes(`Expected i32, found ${type}`));
             const primeWatcher = (file: string) => waitForWatcher(
@@ -354,14 +354,16 @@ export function run(): Promise<void> {
 
         test('serves concrete LSP diagnostics after a nested workspace takes ownership of a buffer', async () => {
             const root = await realpath(await mkdtemp(path.join(tmpdir(), 'teal-vscode-diagnostics-')));
-            const nested = path.join(root, 'child');
-            const outer = vscode.Uri.file(path.join(root, 'outer.tl'));
+            const project = path.join(root, 'app');
+            const nested = path.join(project, 'src/child');
+            const outer = vscode.Uri.file(path.join(project, 'src/main.tl'));
             const inner = vscode.Uri.file(path.join(nested, 'inner.tl'));
             const probe = vscode.Uri.file(path.join(root, 'probe.tl'));
             const anchorCount = vscode.workspace.workspaceFolders?.length ?? 0;
             const errors = (uri: vscode.Uri) => vscode.languages.getDiagnostics(uri).filter(item => item.severity === vscode.DiagnosticSeverity.Error);
             try {
-                await mkdir(nested);
+                await mkdir(nested, { recursive: true });
+                await writeFile(path.join(project, 'package.toml'), 'format = 11\nname = "nested-diagnostics"\nversion = "1.0.0"\nlanguage_edition = "2026"\n[target]\nkind = "bin"\npath = "main.tl"\n');
                 await writeFile(outer.fsPath, 'mod child { pub mod inner; }\nfn main() -> i32 { return child::inner::value(); }\n');
                 await writeFile(inner.fsPath, 'pub fn value() -> i32 { return missing_child_name; }\nfn main() -> i32 { return value(); }\n');
                 await writeFile(probe.fsPath, 'fn main() -> i32 { return missing_parent_name; }\n');
